@@ -1,0 +1,4 @@
+{
+  "enabled": true,
+  "note": "Safety layer for ragas_eval.rag_service. Override with --no-safety or env RAG_SAFETY_LAYER=off."
+}

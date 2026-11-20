@@ -1,0 +1,217 @@
+# rag_config.yaml
+# RAG Ingestion Pipeline v0.1 Configuration
+# Model-agnostic: all model/embedding choices are configurable here, not hardcoded.
+
+pipeline:
+  name: "rag-ingestion-quality"
+  version: "0.1.0"
+  # Steps to run (set to false to skip)
+  steps:
+    parse: true
+    clean: true
+    structure_split: true
+    boundary_guard: true
+    context_inheritance: true
+    build_index: false  # v0.1: requires embedding model; set true when ready
+    eval_quality: true
+
+# ---------------------------------------------------------------------------
+# Step 1: Document Parsing
+# ---------------------------------------------------------------------------
+parsing:
+  # Primary: Docling (pip install docling)
+  # Fallback: pymupdf (pip install pymupdf) for PDF text extraction
+  # Fallback: python-docx (pip install python-docx) for DOCX
+  engine: "auto"  # auto | docling | pymupdf | python-docx
+  supported_extensions:
+    - ".pdf"
+    - ".docx"
+    - ".pptx"
+    - ".html"
+    - ".md"
+    - ".txt"
+  # Maximum file size in MB (skip larger files with warning)
+  max_file_size_mb: 50
+  # Preserve during extraction
+  preserve:
+    headings: true
+    tables: true
+    code_blocks: true
+    page_numbers: true
+    images: false  # v0.1: image extraction not supported yet
+
+# ---------------------------------------------------------------------------
+# Step 2: Text Cleaning
+# ---------------------------------------------------------------------------
+cleaning:
+  remove:
+    headers: true
+    footers: true
+    page_numbers: true
+    watermarks: true
+    repeated_blank_lines: true
+  fix:
+    pdf_line_breaks: true   # Merge broken lines in PDF-extracted text
+    unicode_normalize: true  # NFC normalization
+  # Patterns to detect (regex, case-insensitive)
+  header_patterns:
+    - "第\\s*\\d+\\s*页"
+    - "Page\\s*\\d+"
+    - "\\d+\\s*/\\s*\\d+"
+  footer_patterns:
+    - "版权所有"
+    - "Copyright"
+    - "Confidential"
+    - "机密"
+  watermark_patterns:
+    - "DRAFT"
+    - "草稿"
+    - "SAMPLE"
+    - "样例"
+  navigation_patterns:
+    - "返回目录"
+    - "Back to top"
+    - "上一篇"
+    - "下一篇"
+  # Do NOT delete uncertain content
+  mark_uncertain: true
+  uncertain_marker: "[!UNCERTAIN]"
+
+# ---------------------------------------------------------------------------
+# Step 3: Structure-aware Chunking
+# ---------------------------------------------------------------------------
+chunking:
+  # Split order: headings > paragraphs > fixed-size
+  strategy:
+    - "headings"    # Split on markdown headings (# ## ### etc.)
+    - "paragraphs"  # Split on paragraph breaks
+    - "fixed_size"  # RecursiveCharacterTextSplitter fallback
+  chunk_size: 800       # Target characters per chunk
+  chunk_overlap: 160    # 20% overlap (default, not a hard rule)
+  min_chunk_size: 100   # Merge shorter chunks into neighbors
+  max_chunk_size: 1200  # Hard cap
+
+# ---------------------------------------------------------------------------
+# Step 4: Boundary Guard
+# ---------------------------------------------------------------------------
+boundary_guard:
+  # Sentence-ending punctuation by language
+  sentence_end:
+    zh: ["。", "！", "？", "；", "：", "”", "’", "）", "》", "】"]
+    en: [".", "!", "?", ";", ":", '"', "'", ")", ">", "]"]
+    ja: ["。", "！", "？", "」"]
+  # Words that indicate dependency on previous context
+  dependency_words:
+    zh: ["因此", "所以", "上述", "该方法", "这个", "它", "其", "此外", "另外", "总之", "综上所述", "换句话说"]
+    en: ["this", "that", "therefore", "however", "thus", "hence", "consequently", "furthermore", "moreover", "in summary", "accordingly"]
+    ja: ["これ", "それ", "その", "この", "あの", "したがって", "そのため", "さらに", "また"]
+  # Extend chunk to nearest sentence end
+  extend_to_sentence_end: true
+  max_extension_chars: 300  # Don't extend more than this
+  # Prepend context when dependency words found at chunk start
+  prepend_context_sentences: 2  # Number of sentences from previous chunk
+
+# ---------------------------------------------------------------------------
+# Step 5: Context Inheritance
+# ---------------------------------------------------------------------------
+context:
+  # Metadata fields for every chunk
+  required_metadata:
+    - chunk_id
+    - source_file
+    - source_path
+    - page
+    - title
+    - section_heading
+    - parent_heading
+    - language
+    - cleaning_version
+    - parent_id
+  # Prepend heading context to chunk text
+  prepend_headings: true
+  heading_format: "[{section_heading}] "
+  # Parent-child chunking
+  parent_child:
+    enabled: true
+    parent_size: 2400   # Parent section for LLM context
+    child_size: 800     # Child chunk for retrieval
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Step 6: Dense + Sparse Index (v0.3: hybrid enabled)
+# ---------------------------------------------------------------------------
+index:
+  dense:
+    enabled: true
+    engine: "cosine"
+    path: "index/dense/dense_index.pkl"
+  sparse:
+    enabled: true
+    engine: "bm25"
+    path: "index/sparse/bm25_index.pkl"
+  hybrid:
+    enabled: true
+    bm25_weight: 0.45
+    dense_weight: 0.55
+  # v0.1.1: parent chunks are for LLM context only, not retrieval
+  index_parent_chunks: false
+
+# ---------------------------------------------------------------------------
+# Retrieval Configuration (v0.3.1: RRF fusion + safe mode)
+# ---------------------------------------------------------------------------
+retrieval:
+  top_k_bm25: 25
+  top_k_dense: 25
+  top_k_hybrid: 10
+  dedup_by_parent: true
+  # v0.3.2: union_safe — union BM25 top-K + Dense top-K, dedup, rerank
+  hybrid_fusion_method: union_safe   # union_safe | rrf | weighted
+  rrf_k: 60
+  hybrid_safe_mode: true
+  hybrid_safe_bm25_protect_top: 3
+  no_regression_hybrid: true
+  union_keep_bm25_top: 5
+  union_keep_dense_top: 5
+  union_final_top_k: 10
+  # v0.3.2: rule-based query expansion (no LLM, no network)
+  query_expansion:
+    enabled: true
+    apply_to_bm25: true
+    apply_to_dense: false
+
+# ---------------------------------------------------------------------------
+# Embedding Model Configuration (NOT hardcoded)
+# ---------------------------------------------------------------------------
+embedding:
+  enabled: true
+  provider: "sentence_transformers"
+  # Primary model (multilingual, dense+sparse capable)
+  model_name: "BAAI/bge-m3"
+  # Fallback if primary fails (smaller, faster, multilingual)
+  fallback_model_name: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+  device: "cpu"  # cpu | cuda | mps
+  batch_size: 16
+  normalize_embeddings: true
+
+# ---------------------------------------------------------------------------
+# Step 7: Quality Evaluation
+# ---------------------------------------------------------------------------
+evaluation:
+  checks:
+    empty_chunk: true
+    duplicate_chunk: true
+    oversize_chunk: true
+    undersize_chunk: true
+    broken_sentence: true
+    missing_metadata: true
+    table_cut: true
+    context_dependent: true
+  quality_dimensions:
+    - sentence_complete
+    - semantic_cohesion
+    - context_independence
+    - metadata_complete
+    - table_integrity
+  # Threshold for flagging
+  min_overall_score: 0.6
+  report_path: "chunks/chunks_report.md"

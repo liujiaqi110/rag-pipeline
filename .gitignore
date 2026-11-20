@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+*.env
+data/
+*.pkl
+*.log
+experiments/
+chunks/
+index/
+raw_docs/
+parsed_md/
+clean_md/
+export/

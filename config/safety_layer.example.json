@@ -1,0 +1,4 @@
+{
+  "enabled": true,
+  "note": "Example only. Copy to config/safety_layer.json. enabled=true turns on exact citation-ID checks, full-refusal citation cleanup and the source-attribution guard for ragas_eval.rag_service. Override per run with --safety / --no-safety or env RAG_SAFETY_LAYER=on|off. No keys or credentials are needed."
+}

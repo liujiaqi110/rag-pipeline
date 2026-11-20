@@ -1,0 +1,14 @@
+# v1.1 reference environment (recorded from the existing .venv; NOT installed automatically)
+# Python 3.12.10; local Ollama 0.40.16 with qwen2.5:7b; BAAI/bge-m3 cached locally
+sentence-transformers==5.6.0
+transformers==5.13.0
+torch==2.12.1
+numpy==2.5.1
+huggingface_hub==1.33.0
+pyyaml==6.0.3
+docling==2.110.0
+ragas==0.4.4
+openai==1.109.1
+langchain==1.5.0
+scikit-learn==1.9.0
+pandas==3.0.3
