@@ -1,5 +1,9 @@
-"""Experimental ``hybrid_rrf`` retrieval strategy (v0.5). Independent of — and does not replace —
-the default Hybrid in ``scripts/10_eval_retrieval.py`` / ``scripts/08_rerank.py``.
+"""Reciprocal Rank Fusion of BM25 and Dense — the retrieval fusion used by the formal service (``rag_service`` →
+``rag_retriever.Retriever.rrf``) with the defaults below: k=60, BM25 pool 25, Dense pool 25 (introduced in v0.5,
+selected as the service default after the v0.9 A/B; see docs/experiments/retrieval_ab.md).
+
+The legacy ``search_hybrid`` in ``scripts/10_eval_retrieval.py`` is a different, defective rule ("union_safe",
+BM25-rank-first) and is NOT RRF.
 
     RRF(d) = Σ_i 1 / (k + rank_i(d))      over the BM25 list and the Dense list
 

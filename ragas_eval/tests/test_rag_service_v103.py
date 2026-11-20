@@ -55,7 +55,7 @@ class TestSwitch(unittest.TestCase):
 
 
 class TestChain(unittest.TestCase):
-    def ask(self, text, safety, ids=("c769902edde2", "19c9c0248b15"), q="在线问答流程包含哪些步骤？"):
+    def ask(self, text, safety, ids=("c769902edde2", "19c9c0248b15"), q="示例流程包含哪些步骤？"):
         s = svc.RagService(FakeR(ids), ll.MockLLM(lambda m: text), corpus_ids={"c769902edde2", "19c9c0248b15", "7041b269117c"})
         return s.answer(q, safety=safety)
 
@@ -82,7 +82,7 @@ class TestChain(unittest.TestCase):
         self.assertEqual(len(out["user_response"]["citations"]), 1)
 
     def test_source_scope_through_service(self):
-        out = self.ask("笔记九的内容 [aaaaaaaaaaaa]", True, ids=("aaaaaaaaaaaa",), q="3 [example.com]_笔记(6) 中讲了什么？")
+        out = self.ask("笔记九的内容 [aaaaaaaaaaaa]", True, ids=("aaaaaaaaaaaa",), q="3 [example.com]_notes(6) 中讲了什么？")
         self.assertEqual(out["user_response"]["status"], "insufficient_scoped_evidence")
         self.assertIn("notice", out["user_response"])
         self.assertEqual(out["user_response"]["citations"], [])

@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  software-tests:
+    # Software tests only: no Ollama, no private data, no embedding-model download, no GPU, no credentials.
+    # Heavy local-model integration tests live in tests_local/ and are NOT run here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lightweight dependencies
+        run: python -m pip install -r requirements-ci.txt
+
+      - name: Unit tests
+        run: python -m unittest discover -s ragas_eval/tests -t . -v
+
+      - name: Build example index (BM25 only)
+        run: python scripts/build_example_index.py --out build/example_data
+
+      - name: Validate example annotations
+        run: python -m ragas_eval.retrieval_eval validate --data build/example_data
+
+      - name: Example retrieval evaluation (BM25)
+        run: python -m ragas_eval.retrieval_eval run --data build/example_data --modes bm25 --out build/eval

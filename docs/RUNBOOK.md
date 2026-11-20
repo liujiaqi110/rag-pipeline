@@ -21,3 +21,22 @@ Remove-Item Env:RAG_SAFETY_LAYER
 | `model_missing` | 本机没有 `qwen2.5:7b`；程序不会自动下载 |
 | 中文乱码 | `$env:PYTHONIOENCODING="utf-8"` |
 | `insufficient_scoped_evidence` | 问题指定了某份文档但检索结果中没有，属于检索失败的如实报告 |
+
+## 示例知识库与评估（v1.2）
+
+```powershell
+python scripts/build_example_index.py --dense --force
+python -m ragas_eval.retrieval_eval run --data build/example_data --modes bm25,dense,rrf --out build/eval
+python -m ragas_eval.example_qa --data build/example_data --out build/example_qa
+```
+
+| 现象 | 处理 |
+|---|---|
+| `Dense index was NOT built` | 本机没有缓存 BAAI/bge-m3；自行下载，或加 `--allow-download` |
+| `exists; use --force` | 输出目录已存在；`--force` 只会替换由该脚本创建的目录 |
+| `annotation errors` / `quote not found` | 标注里的原文片段在语料中找不到；修改标注或语料后重新建库 |
+
+## 测试
+
+- `python -m unittest discover -s ragas_eval/tests -t .`：软件测试，与 CI 相同。
+- `python -m unittest discover -s tests_local -t .`：本地重型集成测试，需要 bge-m3 和 Ollama，不在 CI 中运行。

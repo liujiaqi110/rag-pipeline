@@ -50,7 +50,7 @@ class EvalConfig:
     retrieval_top_k: int = 10  # same default as scripts/10_eval_retrieval.py
     context_k: int = 3  # how many retrieved chunks are passed to generation/RAGAS
     recall_ks: List[int] = field(default_factory=lambda: [3, 5])
-    # Experimental hybrid_rrf strategy (opt-in via --strategies hybrid_rrf)
+    # RRF parameters (same values as the formal service: hybrid_rrf.RRFParams defaults)
     rrf_k: int = 60
     rrf_bm25_pool: int = 25
     rrf_dense_pool: int = 25

@@ -202,7 +202,7 @@ class RetrievalAdapter:
     @property
     def available_strategies(self) -> Dict[str, bool]:
         has_dense = self.dense_index is not None
-        # hybrid_rrf is experimental (v0.5) and opt-in; it does not replace "hybrid".
+        # "hybrid" = LEGACY union_safe (not RRF, known defects); "hybrid_rrf" = RRF, the formal service fusion.
         return {"bm25": True, "dense": has_dense, "hybrid": has_dense, "hybrid_rrf": has_dense}
 
     def describe(self) -> Dict[str, Any]:

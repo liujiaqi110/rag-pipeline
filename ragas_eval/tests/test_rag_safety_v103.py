@@ -68,21 +68,21 @@ class TestRefusalCleanup(unittest.TestCase):
         self.assertEqual(rs.classify_refusal("约 9.46 秒 [40ef12f9430b]。")["kind"], "answer")
 
 
-DOCS = ["3 [example.com]_笔记(6).md", "3 [example.com]_笔记(9).md", "3_笔记(1).md", "33课_基于知识库RAG的物流行业信息问答系统_完整复习笔记.md"]
+DOCS = ["3 [example.com]_notes(6).md", "3 [example.com]_notes(9).md", "3_notes(1).md", "33lesson_demo_project_guide.md"]  # fictional names
 
 
 class TestSourceScope(unittest.TestCase):
     def test_explicit_source_detected(self):
-        self.assertEqual(rs.detect_source_scope("3 [example.com]_笔记(6) 中讲解了哪些 Python 编程知识点？", DOCS)["doc"], DOCS[0])
-        self.assertEqual(rs.detect_source_scope("根据笔记(9)，CUDA 怎么装？", DOCS)["doc"], DOCS[1])
-        self.assertEqual(rs.detect_source_scope("物流 RAG 系统（3_笔记(1)）如何增强元数据？", DOCS)["doc"], DOCS[2])
+        self.assertEqual(rs.detect_source_scope("3 [example.com]_notes(6) 中讲解了哪些编程知识点？", DOCS)["doc"], DOCS[0])
+        self.assertEqual(rs.detect_source_scope("根据notes(9)，驱动怎么装？", DOCS)["doc"], DOCS[1])
+        self.assertEqual(rs.detect_source_scope("示例系统（3_notes(1)）如何增强元数据？", DOCS)["doc"], DOCS[2])
 
     def test_mentions_are_not_scope(self):
-        for q in ("第33课和智能体课分别创建了什么 conda 环境？", "第33课需要在 Ollama 中准备哪两个模型？", "Dify 与第33课的代码实现是什么关系？"):
+        for q in ("33lesson和另一课分别创建了什么环境？", "33lesson需要准备哪两个模型？", "某工具与33lesson的代码实现是什么关系？"):
             self.assertIsNone(rs.detect_source_scope(q, DOCS), q)
 
     def test_ambiguous_scope_not_guessed(self):
-        self.assertIsNone(rs.detect_source_scope("笔记(6) 中和笔记(9) 中各讲了什么？", DOCS))
+        self.assertIsNone(rs.detect_source_scope("notes(6) 中和notes(9) 中各讲了什么？", DOCS))
 
 
 class FakeBM25:
@@ -109,7 +109,7 @@ class TestSafePipeline(unittest.TestCase):
         return out, llm
 
     def test_scope_without_target_doc_no_generation(self):
-        out, llm = self.run_(["aaaaaaaaaaaa"], "3 [example.com]_笔记(6) 中讲了什么？", "笔记(6) 讲了 X [aaaaaaaaaaaa]")
+        out, llm = self.run_(["aaaaaaaaaaaa"], "3 [example.com]_notes(6) 中讲了什么？", "notes(6) 讲了 X [aaaaaaaaaaaa]")
         self.assertEqual(llm.calls, 0)
         self.assertEqual(out["response"]["status"], "insufficient_scoped_evidence")
         self.assertTrue(out["safety"]["retrieval_failure"])
@@ -122,7 +122,7 @@ class TestSafePipeline(unittest.TestCase):
             seen["u"] = m[1]["content"]
             return "笔记六的内容 [bbbbbbbbbbbb]\n引用：bbbbbbbbbbbb"
         llm = ll.MockLLM(resp)
-        out = rs.SafeRagPipeline(FakeR(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]), llm, rp.PipelineConfig(mode="rrf")).answer("3 [example.com]_笔记(6) 中讲了什么？")
+        out = rs.SafeRagPipeline(FakeR(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]), llm, rp.PipelineConfig(mode="rrf")).answer("3 [example.com]_notes(6) 中讲了什么？")
         self.assertNotIn("aaaaaaaaaaaa", seen["u"])            # other document's chunk never shown to the model
         self.assertEqual(out["safety"]["scope_action"], "restricted_context")
         self.assertEqual(out["response"]["valid_citations"], ["bbbbbbbbbbbb"])

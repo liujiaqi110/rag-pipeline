@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-10_eval_retrieval.py — Retrieval Evaluation (v0.3.1)
+10_eval_retrieval.py — LEGACY retrieval evaluator (v0.3.x). Kept as a historical implementation.
 
-Evaluates BM25 / Dense / Hybrid retrieval with RRF fusion + safe mode.
-Outputs 3-mode comparison in retrieval_eval_report.md.
+What is still used from this file (unchanged code, imported by ragas_eval.dataset_adapter / rag_retriever):
+  * SimpleBM25 (to unpickle the BM25 index), search_bm25, search_dense — the scoring of the formal service.
 
-Usage:
+What is LEGACY and must not be used as the recommended method:
+  * search_hybrid_legacy_union_safe (alias: search_hybrid) — the v0.3.2 "union_safe" rule. It is NOT RRF and NOT a
+    weighted fusion. Known defects (diagnosed in v0.9, see docs/experiments/retrieval_ab.md):
+      1. ordering key is (bm25_rank or 999, dense_rank or 999): BM25 rank dominates, Dense only breaks ties;
+      2. a chunk first added in the Dense loop keeps bm25_rank=None even when it is in the BM25 top-25,
+         so candidates found by BOTH retrievers can be sorted after every BM25 candidate;
+      3. Dense-only candidates get 999 and are truncated away at top-k;
+      4. zero-score BM25 candidates are not filtered; the function mutates its input dicts.
+    The formal service uses RRF instead: ragas_eval.hybrid_rrf.rrf_fuse, k=60, BM25/Dense pools 25/25.
+  * compute_source_hit (formerly named compute_recall): returns True if ANY of the top-k chunks comes from a file
+    whose name contains expected_source. This is a **Source Hit@K**, not a standard Recall@K. Chunk-level
+    Recall@K / MRR / nDCG@K / evidence-slot coverage are in ragas_eval.retrieval_metrics.
+
+Usage (legacy question format with expected_source / expected_keywords; index under ./index):
   python scripts/10_eval_retrieval.py
 """
 
@@ -111,8 +124,10 @@ def search_dense(query, dense_index, top_k=25, metadata_filter=None):
     return results
 
 
-def search_hybrid(query, bm25, dense_index, top_k=10, metadata_filter=None):
-    """v0.3.2: union_safe hybrid — union BM25(top5) + Dense(top5), dedup, rerank."""
+def search_hybrid_legacy_union_safe(query, bm25, dense_index, top_k=10, metadata_filter=None):
+    """LEGACY v0.3.2 union_safe hybrid (NOT RRF): union BM25(top5) + Dense(top5) + remaining top-25 candidates,
+    dedup, sort by (bm25_rank or 999, dense_rank or 999). Kept unchanged for reproducibility; see module docstring
+    for the known defects. Use ragas_eval.hybrid_rrf.rrf_fuse (k=60, pools 25/25) instead."""
     bm25_r = search_bm25(query, bm25, top_k=25, metadata_filter=metadata_filter)
     if not dense_index:
         return bm25_r[:top_k]
@@ -143,9 +158,14 @@ def search_hybrid(query, bm25, dense_index, top_k=10, metadata_filter=None):
     return union[:top_k]
 
 
+search_hybrid = search_hybrid_legacy_union_safe  # backward-compatible name used by dataset_adapter ("hybrid" = legacy)
+LEGACY_HYBRID_LABEL = "Hybrid (legacy union_safe, NOT RRF)"
+
+
 # --- Scoring ---
 
-def compute_recall(results, expected_source, k):
+def compute_source_hit(results, expected_source, k):
+    """Source Hit@K: True if any top-k chunk's source_file contains expected_source. NOT a chunk-level Recall@K."""
     if not expected_source: return False
     for r in results[:k]:
         if expected_source in r["chunk"].get("source_file", ""): return True
@@ -190,7 +210,7 @@ def classify_failure(bm_passed, de_passed, hy_passed, bm_rank, de_rank, hy_rank,
 
 def score_mode(results, q, top_k, mode, available):
     src = q.get("expected_source", ""); kw = q.get("expected_keywords", [])
-    r5 = compute_recall(results, src, 5); r10 = compute_recall(results, src, 10)
+    r5 = compute_source_hit(results, src, 5); r10 = compute_source_hit(results, src, 10)
     kw10 = compute_kw_hit(results, kw, 10)
     top_srcs = list(dict.fromkeys(r["chunk"].get("source_file", "?") for r in results[:5]))
     rank = find_source_rank(results, src)
@@ -205,7 +225,7 @@ def score_mode(results, q, top_k, mode, available):
         if kw and kw10 < 0.6: fails.append(f"keyword hit {kw10:.0%} < 60%")
 
     return {
-        f"{mode}_recall5": r5, f"{mode}_recall10": r10,
+        f"{mode}_source_hit5": r5, f"{mode}_source_hit10": r10,
         f"{mode}_kw10": round(kw10, 2),
         f"{mode}_sources": top_srcs, f"{mode}_all_sources": top_srcs,
         f"{mode}_passed": len(fails) == 0, f"{mode}_fail": "; ".join(fails),
@@ -266,7 +286,7 @@ def generate_report(results, output_path, dense_available):
 
     lines = [
         f"# Retrieval Evaluation Report",
-        f"**Generated**: {now}  **Pipeline**: v0.3.2 (union_safe + query expansion)",
+        f"**Generated**: {now}  **Pipeline**: LEGACY v0.3.2 evaluator (Hybrid = union_safe, NOT RRF; SourceHit = file-level hit, NOT Recall)",
         "", "## Mode Comparison", "",
         f"| Mode | Passed | Pass Rate |",
         f"|------|--------|-----------|",
@@ -275,7 +295,7 @@ def generate_report(results, output_path, dense_available):
     if dense_available:
         lines.extend([
             f"| Dense-only | {de_p}/{total} | {de_p/max(total,1):.0%} |",
-            f"| Hybrid (RRF+safe) | {hy_p}/{total} | {hy_p/max(total,1):.0%} |",
+            f"| {LEGACY_HYBRID_LABEL} | {hy_p}/{total} | {hy_p/max(total,1):.0%} |",
         ])
     else:
         lines.extend(["| Dense-only | N/A | index not available |",
@@ -298,12 +318,12 @@ def generate_report(results, output_path, dense_available):
         hy_ok = ("PASS" if r.get("hybrid_passed") else "FAIL") if dense_available else "N/A"
         lines.extend([
             f"### {i+1}. {r['question']}", "",
-            f"| Mode | Result | Recall@5 | Recall@10 | KW@10 | Top Sources |",
+            f"| Mode | Result | SourceHit@5 | SourceHit@10 | KW@10 | Top Sources |",
             f"|------|--------|----------|-----------|-------|-------------|",
-            f"| BM25 | {bm_ok} | {r['bm25_recall5']} | {r['bm25_recall10']} | {r['bm25_kw10']:.0%} | {', '.join(r['bm25_sources'][:3])} |",
+            f"| BM25 | {bm_ok} | {r['bm25_source_hit5']} | {r['bm25_source_hit10']} | {r['bm25_kw10']:.0%} | {', '.join(r['bm25_sources'][:3])} |",
         ])
         if dense_available:
-            lines.append(f"| Dense | {de_ok} | {r['dense_recall5']} | {r['dense_recall10']} | {r['dense_kw10']:.0%} | {', '.join(r.get('dense_sources',[])[:3])} |")
+            lines.append(f"| Dense | {de_ok} | {r['dense_source_hit5']} | {r['dense_source_hit10']} | {r['dense_kw10']:.0%} | {', '.join(r.get('dense_sources',[])[:3])} |")
             lines.append(f"| Hybrid | {hy_ok} | - | - | - | {', '.join(r.get('hybrid_sources',[])[:3])} |")
         for mode in ["bm25", "dense", "hybrid"]:
             fk = f"{mode}_fail"
@@ -319,7 +339,7 @@ def generate_report(results, output_path, dense_available):
 
     lines.extend(["## Recommendation", ""])
     if hy_p >= total * 0.9:
-        lines.append("- ✅ Hybrid pass rate >= 90% — **ready for v0.3 stable tag**")
+        lines.append("- Legacy hybrid pass rate >= 90% (legacy metric; not a recommendation)")
     elif hy_p >= bm_p:
         lines.append(f"- Hybrid improves over BM25 ({hy_p}/{total} vs {bm_p}/{total}) — continue tuning")
     else:
@@ -332,13 +352,13 @@ def generate_report(results, output_path, dense_available):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Retrieval evaluation v0.3.1")
+    p = argparse.ArgumentParser(description="LEGACY retrieval evaluator (SourceHit@K, union_safe hybrid)")
     p.add_argument("--questions", default=str(QUESTIONS_PATH))
     p.add_argument("--top_k", type=int, default=10)
     a = p.parse_args()
 
     print("=" * 60)
-    print("10_eval_retrieval.py — Retrieval Evaluator v0.3.1 (RRF + safe mode)")
+    print("10_eval_retrieval.py — LEGACY retrieval evaluator (Hybrid = union_safe, NOT RRF)")
     print("=" * 60)
 
     qp = Path(a.questions)
@@ -365,10 +385,10 @@ def main():
         de_s = ("PASS" if r.get("dense_passed") else "FAIL") if da else "N/A"
         hy_s = ("PASS" if r.get("hybrid_passed") else "FAIL") if da else "N/A"
         print(f"\n  [{bm_s} | {de_s} | {hy_s}] {r['question'][:80]}")
-        print(f"    BM25:    R@5={r['bm25_recall5']} R@10={r['bm25_recall10']} KW={r['bm25_kw10']:.0%}  src={', '.join(r['bm25_sources'][:2])}")
+        print(f"    BM25:    SourceHit@5={r['bm25_source_hit5']} SourceHit@10={r['bm25_source_hit10']} KW={r['bm25_kw10']:.0%}  src={', '.join(r['bm25_sources'][:2])}")
         if da:
-            print(f"    Dense:   R@5={r['dense_recall5']} R@10={r['dense_recall10']} KW={r['dense_kw10']:.0%}  src={', '.join(r.get('dense_sources',[])[:2])}")
-            print(f"    Hybrid:  RRF fusion  src={', '.join(r.get('hybrid_sources',[])[:2])}")
+            print(f"    Dense:   SourceHit@5={r['dense_source_hit5']} SourceHit@10={r['dense_source_hit10']} KW={r['dense_kw10']:.0%}  src={', '.join(r.get('dense_sources',[])[:2])}")
+            print(f"    Hybrid (legacy union_safe):  src={', '.join(r.get('hybrid_sources',[])[:2])}")
         for mode in ["bm25", "dense", "hybrid"]:
             fk = f"{mode}_fail"
             if r.get(fk) and (mode != "dense" or da):
@@ -382,7 +402,7 @@ def main():
         de_p = sum(1 for r in results if r.get("dense_passed"))
         hy_p = sum(1 for r in results if r.get("hybrid_passed"))
         print(f"Dense: {de_p}/{len(qs)} ({de_p/max(len(qs),1):.0%})")
-        print(f"Hybrid: {hy_p}/{len(qs)} ({hy_p/max(len(qs),1):.0%})")
+        print(f"Hybrid (legacy union_safe): {hy_p}/{len(qs)} ({hy_p/max(len(qs),1):.0%})")
 
 
 if __name__ == "__main__":

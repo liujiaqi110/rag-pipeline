@@ -15,9 +15,11 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from .config import PROJECT_ROOT
-from .hybrid_rrf import rrf_fuse
+from .hybrid_rrf import RRFParams, rrf_fuse
 
-POOL = 25
+# Formal service retrieval (explicit; equal to RRFParams defaults): RRF k=60, BM25 pool 25, Dense pool 25.
+SERVICE_RRF = RRFParams(k=60, bm25_pool=25, dense_pool=25)
+POOL = SERVICE_RRF.dense_pool
 
 
 def data_dir() -> Path:
@@ -31,7 +33,7 @@ class Retriever:
         bm, de = base / "index" / "sparse" / "bm25_index.pkl", base / "index" / "dense" / "dense_index.pkl"
         if not bm.exists() or not de.exists():
             raise FileNotFoundError("index not found: set RAG_DATA_DIR to the private data directory (see README)")
-        self.ad = RetrievalAdapter(device="cpu", bm25_path=bm, dense_path=de)
+        self.ad = RetrievalAdapter(device="cpu", rrf_params=SERVICE_RRF, bm25_path=bm, dense_path=de)
         self.m, self.bm25, self.di = self.ad.mod, self.ad.bm25, self.ad.dense_index
         self.model = get_sentence_transformer(self.di.get("model_name", "BAAI/bge-m3"), "cpu")
         self.E = np.asarray(self.di["embeddings"])

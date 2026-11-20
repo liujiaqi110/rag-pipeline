@@ -1,6 +1,19 @@
 # rag_config.yaml
-# RAG Ingestion Pipeline v0.1 Configuration
-# Model-agnostic: all model/embedding choices are configurable here, not hardcoded.
+#
+# WHICH FIELDS ARE ACTUALLY READ (v1.2 audit; see docs/CONFIG.md)
+#   * scripts/06_build_dense_sparse_index.py (index build):
+#       embedding.model_name / fallback_model_name / normalize_embeddings / batch_size, index.index_parent_chunks
+#   * ragas_eval/config.py: embedding.model_name / embedding.device (evaluation helpers only)
+#   * NOTHING ELSE. In particular:
+#       - the formal service (ragas_eval.rag_service) does NOT read this file for retrieval; its fusion is fixed in
+#         code: RRF k=60, BM25 pool 25, Dense pool 25 (ragas_eval/rag_retriever.SERVICE_RRF), context top-5,
+#         6000 chars (rag_pipeline.PipelineConfig). The `service_retrieval` block below documents those values and
+#         a regression test keeps it in sync with the code.
+#       - `retrieval.*` and `index.hybrid.*` belong to the LEGACY v0.3 evaluator and are not used by any current code
+#         (the 0.45/0.55 weights were never applied, even by the legacy union_safe hybrid).
+#       - `chunking.*`: scripts/03 defines load_config() but never calls it; chunking uses the constants in the
+#         script (800 / 160 / 100 / 1200, identical to the values below).
+#       - parsing / cleaning / boundary_guard / context / evaluation / pipeline: descriptive only (v0.1 design notes).
 
 pipeline:
   name: "rag-ingestion-quality"
@@ -80,7 +93,7 @@ cleaning:
 # ---------------------------------------------------------------------------
 # Step 3: Structure-aware Chunking
 # ---------------------------------------------------------------------------
-chunking:
+chunking:               # documented values; scripts/03 uses identical in-code constants (load_config() is never called)
   # Split order: headings > paragraphs > fixed-size
   strategy:
     - "headings"    # Split on markdown headings (# ## ### etc.)
@@ -138,7 +151,7 @@ context:
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# Step 6: Dense + Sparse Index (v0.3: hybrid enabled)
+# Step 6: Dense + Sparse Index (paths below are the legacy defaults; scripts/06 takes --output-dir)
 # ---------------------------------------------------------------------------
 index:
   dense:
@@ -149,23 +162,36 @@ index:
     enabled: true
     engine: "bm25"
     path: "index/sparse/bm25_index.pkl"
-  hybrid:
+  hybrid:                # LEGACY, NOT READ by any code (weights were never applied)
     enabled: true
     bm25_weight: 0.45
     dense_weight: 0.55
-  # v0.1.1: parent chunks are for LLM context only, not retrieval
+  # v0.1.1: parent chunks are for LLM context only, not retrieval   (READ by scripts/06)
   index_parent_chunks: false
 
 # ---------------------------------------------------------------------------
-# Retrieval Configuration (v0.3.1: RRF fusion + safe mode)
+# Formal service retrieval — DOCUMENTATION of the values fixed in code (not read at runtime).
+# tests/test_v12_legacy_and_config.py fails if this block and the code disagree.
+# ---------------------------------------------------------------------------
+service_retrieval:
+  fusion: rrf              # ragas_eval.hybrid_rrf.rrf_fuse
+  rrf_k: 60
+  bm25_pool: 25            # non-zero BM25 candidates
+  dense_pool: 25
+  context_top_k: 5
+  context_char_budget: 6000
+
+# ---------------------------------------------------------------------------
+# LEGACY retrieval configuration (v0.3.x evaluator). NOT READ by any current code; kept for history.
+# "union_safe" is NOT RRF and has known defects (BM25-rank-first ordering, lost ranks, Dense-only truncation).
 # ---------------------------------------------------------------------------
 retrieval:
   top_k_bm25: 25
   top_k_dense: 25
   top_k_hybrid: 10
   dedup_by_parent: true
-  # v0.3.2: union_safe — union BM25 top-K + Dense top-K, dedup, rerank
-  hybrid_fusion_method: union_safe   # union_safe | rrf | weighted
+  # LEGACY v0.3.2 union_safe — union BM25 top-K + Dense top-K, dedup, BM25-rank-first sort (NOT RRF)
+  hybrid_fusion_method: union_safe   # legacy value; the formal service uses RRF (see service_retrieval)
   rrf_k: 60
   hybrid_safe_mode: true
   hybrid_safe_bm25_protect_top: 3

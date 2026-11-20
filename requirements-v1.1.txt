@@ -1,4 +1,7 @@
-# v1.1 reference environment (recorded from the existing .venv; NOT installed automatically)
+# v1.1 RESEARCH reference environment (recorded from the research .venv; NOT installed automatically).
+# The public code only needs requirements.txt (runtime) / requirements-ci.txt (tests).
+# docling, ragas, openai, langchain, scikit-learn and pandas are NOT imported by any public code: they belonged to
+# research tooling that is not part of this repository (in particular there is no RAGAS evaluation here).
 # Python 3.12.10; local Ollama 0.40.16 with qwen2.5:7b; BAAI/bge-m3 cached locally
 sentence-transformers==5.6.0
 transformers==5.13.0

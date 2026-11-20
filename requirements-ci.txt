@@ -1,0 +1,2 @@
+# CI / software tests only (no embedding model, no Ollama). Everything else in the test suite is standard library.
+pyyaml==6.0.3
