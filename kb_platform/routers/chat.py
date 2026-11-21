@@ -12,7 +12,8 @@
 
 from __future__ import annotations
 
-from typing import List
+import time
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
@@ -93,27 +94,61 @@ def delete_session(session_id: str, request: Request, user: User = Depends(curre
 
 @router.post("/{session_id}/ask", response_model=AskOut, responses=ERR, summary="在会话中提问（ACL + 强制安全层）")
 def ask(session_id: str, body: AskIn, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    t0 = time.perf_counter()
     s = own_session(db, user, session_id)
     st = request.app.state.settings
     if len(body.question) > st.max_question_chars:
         raise ApiError(422, "question_too_long", f"问题不能超过 {st.max_question_chars} 个字符")
     prep = _prepare(request, db, user, s, body.question)
-    if prep["policy"] is None:
-        user_resp = {"answer": DENIED_TEXT, "citations": [], "status": "access_denied"}
-        summary = {"status": "access_denied", "reason": "policy_error", "llm_calls": 0, "scope_key": ""}
-        cached = False
+    pre = _faq_or_none(request, db, user, s, body.question, prep)
+    if pre is not None:
+        user_resp, summary, cached, source, faq_id = pre
     else:
         try:
             user_resp, summary, cached = request.app.state.backend.ask(
                 prep["policy"], user.username, s.kb_id, body.question, retriever=prep["retriever"],
                 generation=prep["generation"])
         except FileNotFoundError:
+            _record(request, db, user, s.kb_id, body.question, "error", "none", error_code="index_unavailable", t0=t0)
             audit(db, action="chat.ask", outcome="error", actor=user.username, resource=s.id,
                   request_id=request_id(request), detail={**prep["fp"], "error": "index_unavailable"})
             raise ApiError(503, "index_unavailable", "知识库索引不可用，请联系管理员")
-    m = _store(db, user, s, body.question, user_resp, summary, cached, request_id(request), prep["fp"])
+        source, faq_id = ("answer_cache" if cached else "rag"), None
+    m = _store(db, user, s, body.question, user_resp, summary, cached, request_id(request), prep["fp"], commit=False)
+    _record(request, db, user, s.kb_id, body.question, m.status, source, summary=summary, session_id=s.id,
+            message_id=m.id, citations=m.citations, faq_id=faq_id, t0=t0, prep=prep)
+    db.commit()
     return AskOut(session_id=s.id, message_id=m.id, answer=m.answer, citations=m.citations, status=m.status,
-                  notice=user_resp.get("notice"))
+                  notice=user_resp.get("notice"), source=source, faq_id=faq_id)
+
+
+def _faq_or_none(request: Request, db: Session, user: User, s: ChatSession, question: str, prep: dict):
+    """Answers that need no pipeline run: fail-closed denial, or a valid published FAQ (P5). None → run the RAG."""
+    if prep["policy"] is None:
+        return ({"answer": DENIED_TEXT, "citations": [], "status": "access_denied"},
+                {"status": "access_denied", "reason": "policy_error", "llm_calls": 0, "scope_key": ""}, False, "none", None)
+    from ..ops import faq as faq_ops
+    kb = kb_by_id(db, s.kb_id)
+    hit = faq_ops.match(db, request.app.state.backend, request.app.state.settings, user, kb, question, prep["retriever"])
+    if hit is None:
+        return None
+    f = hit["faq"]
+    summary = {"status": "ok", "llm_calls": 0, "scope_key": prep["scope_key"], "generation": prep["generation"],
+               "mode": "faq", "retrieved": len(hit["citations"])}
+    return ({"answer": hit["answer"], "citations": hit["citations"], "status": "ok"}, summary, False, "faq", f.id)
+
+
+def _record(request: Request, db: Session, user: User, kb_id: str, question: str, status: str, source: str,
+            summary: Optional[dict] = None, session_id: Optional[str] = None, message_id: Optional[int] = None,
+            citations: Optional[list] = None, faq_id: Optional[str] = None, error_code: Optional[str] = None,
+            t0: Optional[float] = None, prep: Optional[dict] = None):
+    from ..ops import events
+    app = request.app
+    events.record(db, settings=app.state.settings, backend=app.state.backend, user=user, kb_id=kb_id, question=question,
+                  status=status, source=source, summary=summary, session_id=session_id, message_id=message_id,
+                  citations=citations, faq_id=faq_id, error_code=error_code,
+                  latency_ms=round((time.perf_counter() - t0) * 1000, 2) if t0 else None,
+                  policy=(prep or {}).get("policy"), retriever=(prep or {}).get("retriever"))
 
 
 def _prepare(request: Request, db: Session, user: User, s: ChatSession, question: str) -> dict:
@@ -134,11 +169,13 @@ def _prepare(request: Request, db: Session, user: User, s: ChatSession, question
     if policy is not None and not backend.external:
         gen = backend.index.active_generation(db)
         if gen is None:
+            _record(request, db, user, s.kb_id, question, "error", "none", error_code="index_unavailable")
             audit(db, action="chat.ask", outcome="error", actor=user.username, resource=s.id, request_id=rid,
                   detail={**fp, "error": "index_unavailable"})
             raise ApiError(503, "index_unavailable", "知识库索引尚未构建，请联系管理员")
         out["retriever"], out["generation"] = backend.index.retriever(gen), gen.id
         if backend.mode == "rrf" and not out["retriever"].has_dense:
+            _record(request, db, user, s.kb_id, question, "error", "none", error_code="dense_unavailable")
             audit(db, action="chat.ask", outcome="error", actor=user.username, resource=s.id, request_id=rid,
                   detail={**fp, "error": "dense_unavailable", "generation": gen.id})
             raise ApiError(503, "dense_unavailable", "向量检索不可用：当前索引没有 Dense 部分或本地向量模型无法加载。"
@@ -161,7 +198,7 @@ def pin_citations(db: Session, citations: list) -> list:
 
 
 def _store(db: Session, user: User, s: ChatSession, question: str, user_resp: dict, summary: dict, cached: bool,
-           rid: str, fp: dict, hidden: bool = False) -> ChatMessage:
+           rid: str, fp: dict, hidden: bool = False, commit: bool = True) -> ChatMessage:
     m = ChatMessage(session_id=s.id, question=question, answer=user_resp.get("answer", ""),
                     citations=pin_citations(db, user_resp.get("citations") or []), status=user_resp.get("status") or "",
                     scope_key="revoked" if hidden else summary.get("scope_key", ""))
@@ -170,7 +207,7 @@ def _store(db: Session, user: User, s: ChatSession, question: str, user_resp: di
     audit(db, action="chat.ask", outcome=("revoked" if hidden else user_resp.get("status")) or "unknown",
           actor=user.username, resource=s.id, request_id=rid,
           detail={**fp, **{k: v for k, v in summary.items() if k != "scope_key"}, "cached": cached,
-                  "citations": len(user_resp.get("citations") or []), "kb_id": s.kb_id})
+                  "citations": len(user_resp.get("citations") or []), "kb_id": s.kb_id}, commit=commit)
     return m
 
 
@@ -180,8 +217,11 @@ def ask_stream(session_id: str, body: AskIn, request: Request, user: User = Depe
                db: Session = Depends(get_db)):
     """``text/event-stream`` events: ``status`` → ``delta``* → ``final`` (validated answer + citations, replaces the
     streamed text) | ``revoked`` (permissions / login changed: stop and discard) | ``error``."""
+    t0 = time.perf_counter()
     s = own_session(db, user, session_id)
     prep = _prepare(request, db, user, s, body.question)
+    pre = _faq_or_none(request, db, user, s, body.question, prep)   # FAQ / denial decided on the request thread
+    db.commit()                                                        # (persists the FAQ hit counter)
     app, rid, raw_token = request.app, request_id(request), getattr(request.state, "raw_token", "")
     sm, uid, sid, kb_id = app.state.sessionmaker, user.id, s.id, s.kb_id
 
@@ -199,20 +239,26 @@ def ask_stream(session_id: str, body: AskIn, request: Request, user: User = Depe
                 return False
 
     def finish(result, hidden: bool) -> dict:
-        user_resp, summary, cached = result
+        user_resp, summary, cached = result[:3]
+        source, faq_id = (result[3], result[4]) if len(result) > 3 else (("answer_cache" if cached else "rag"), None)
         with sm() as db2:
             from ..models import User as U
             u, ss = db2.get(U, uid), db2.get(ChatSession, sid)
-            m = _store(db2, u, ss, body.question, user_resp, summary, cached, rid, prep["fp"], hidden=hidden)
+            m = _store(db2, u, ss, body.question, user_resp, summary, cached, rid, prep["fp"], hidden=hidden, commit=False)
+            prep2 = dict(prep)
+            if prep["policy"] is not None and not app.state.backend.external:
+                prep2["retriever"] = prep["retriever"]
+            _record(request, db2, u, kb_id, body.question, m.status if not hidden else "revoked", source,
+                    summary=summary, session_id=sid, message_id=m.id, citations=m.citations, faq_id=faq_id, t0=t0,
+                    prep=prep2)
             db2.commit()
             return AskOut(session_id=sid, message_id=m.id, answer=m.answer, citations=m.citations, status=m.status,
-                          notice=user_resp.get("notice")).model_dump(mode="json")
+                          notice=user_resp.get("notice"), source=source, faq_id=faq_id).model_dump(mode="json")
 
-    if prep["policy"] is None:
-        def denied(wrap):
-            return ({"answer": DENIED_TEXT, "citations": [], "status": "access_denied"},
-                    {"status": "access_denied", "reason": "policy_error", "llm_calls": 0, "scope_key": ""}, False)
-        run = denied
+    if pre is not None:
+        def precomputed(wrap):
+            return pre
+        run = precomputed
     else:
         def run(wrap):
             return app.state.backend.ask(prep["policy"], user.username, kb_id, body.question,

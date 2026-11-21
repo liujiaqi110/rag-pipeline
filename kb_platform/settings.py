@@ -16,6 +16,13 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = field(default_factory=lambda: os.environ.get("KB_DATABASE_URL", "sqlite:///./build/kb_platform.db"))
@@ -44,3 +51,12 @@ class Settings:
     jwt_audience: str = "kb_platform_api"
     # background jobs: thread = worker thread (production); inline = run right after enqueue (tests / tiny setups)
     jobs_mode: str = field(default_factory=lambda: os.environ.get("KB_JOBS_MODE", "thread"))
+    # --- P5 knowledge operations (all thresholds are cosine similarities of normalised embeddings) ---
+    faq_enabled: bool = field(default_factory=lambda: os.environ.get("KB_FAQ_ENABLED", "1") != "0")
+    faq_match_threshold: float = field(default_factory=lambda: _float("KB_FAQ_MATCH_THRESHOLD", 0.86))
+    faq_cluster_threshold: float = field(default_factory=lambda: _float("KB_FAQ_CLUSTER_THRESHOLD", 0.80))
+    faq_min_frequency: int = field(default_factory=lambda: _int("KB_FAQ_MIN_FREQUENCY", 3))
+    gap_merge_threshold: float = field(default_factory=lambda: _float("KB_GAP_MERGE_THRESHOLD", 0.85))
+    gap_repeat_threshold: int = field(default_factory=lambda: _int("KB_GAP_REPEAT_THRESHOLD", 3))
+    low_relevance_threshold: float = field(default_factory=lambda: _float("KB_LOW_RELEVANCE_THRESHOLD", 0.35))
+    knowledge_max_age_days: int = field(default_factory=lambda: _int("KB_KNOWLEDGE_MAX_AGE_DAYS", 365))

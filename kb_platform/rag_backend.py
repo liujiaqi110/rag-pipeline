@@ -121,15 +121,21 @@ class RagBackend:
         scope = svc.scope_for(username)
         key = AnswerCache.key(scope.cache_key, f"{kb_id}@{generation}", question)
         hit = self.cache.get(key)
-        if hit is not None:
-            return hit["user"], hit["summary"], True
+        if hit is not None:   # no model call for THIS request: report it as such (P5 metrics)
+            return hit["user"], dict(hit["summary"], llm_calls=0, prompt_tokens=0, output_tokens=0,
+                                     generation_ms=None), True
         out = svc.answer(question, username)
         user, aud = out["user_response"], out["audit"]
         summary = {"status": user.get("status"), "llm_calls": aud.get("llm_calls", 0),
                    "authorized_documents": (aud.get("acl") or {}).get("authorized_documents", 0),
                    "authorized_chunks": (aud.get("acl") or {}).get("authorized_chunks", 0),
                    "policy_version": policy.version, "error": aud.get("error_kind"),
-                   "scope_key": scope.cache_key, "generation": generation, "mode": self.mode}
+                   "scope_key": scope.cache_key, "generation": generation, "mode": self.mode,
+                   # P5 service-log fields (counts / timings only, never text)
+                   "prompt_tokens": int((aud.get("tokens") or {}).get("prompt") or 0),
+                   "output_tokens": int((aud.get("tokens") or {}).get("output") or 0),
+                   "generation_ms": (aud.get("timings_ms") or {}).get("generation"),
+                   "model": aud.get("model"), "retrieved": len(aud.get("retrieved_ids") or [])}
         if user.get("status") in CACHEABLE:
             self.cache.put(key, {"user": user, "summary": summary})
         return user, summary, False

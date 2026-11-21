@@ -97,9 +97,9 @@ class JobRunner:
 
     # enqueue / control -----------------------------------------------------------------------------------------------
     def enqueue(self, db, kind: str, created_by: str, kb_id: Optional[str] = None, document_id: Optional[str] = None,
-                version_id: Optional[str] = None) -> Job:
+                version_id: Optional[str] = None, params: Optional[dict] = None) -> Job:
         j = Job(kind=kind, status="queued", stage="queued", created_by=created_by[:64], kb_id=kb_id,
-                document_id=document_id, version_id=version_id)
+                document_id=document_id, version_id=version_id, result={"params": params or {}})
         db.add(j)
         db.commit()
         if self.mode == "inline":
@@ -155,6 +155,8 @@ class JobRunner:
                 result = self._process(job_id)
             elif kind == "index":
                 result = self._index(job_id)
+            elif kind in ("faq_mine", "gap_verify"):          # P5
+                result = self._ops(job_id, kind)
             else:
                 raise IngestError("unknown_job", "未知任务类型", 500)
             status = "failed" if result.get("failed") else "succeeded"
@@ -212,6 +214,22 @@ class JobRunner:
                         "generation_id": active.id if active else None, "dense": active.dense if active else None}
             self.backend.cache.clear()
             return {"generation_id": g.id, "dense": g.dense, "dense_error": g.dense_error, "chunks": g.chunk_count}
+
+    def _ops(self, job_id: str, kind: str) -> Dict[str, Any]:
+        from .ops import faq, gaps
+        with self.sm() as db:
+            j = db.get(Job, job_id)
+            params = dict((j.result or {}).get("params") or {})
+            actor, kb_id = j.created_by, j.kb_id
+        self._set(job_id, stage="mining" if kind == "faq_mine" else "verifying", progress=20)
+        self._checkpoint(job_id, "before_ops")
+        with self.sm() as db:
+            if kind == "faq_mine":
+                out = faq.mine(db, self.backend, self.settings, kb_id, actor, params)
+            else:
+                out = gaps.verify(db, self.backend, self.settings, params.get("gap_id"), actor)
+            db.commit()
+        return {"params": params, **out}
 
     def _actor(self, job_id: str) -> str:
         with self.sm() as db:

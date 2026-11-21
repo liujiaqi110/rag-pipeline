@@ -121,6 +121,7 @@ class IngestCase(ApiCase):
 
     dense_mode = "auto"
     jobs_mode = "inline"          # P3 tests: jobs run synchronously through the job runner (same code path)
+    extra_settings: dict = {}     # P5: per-class overrides (thresholds …)
 
     @classmethod
     def database_url(cls):
@@ -141,7 +142,7 @@ class IngestCase(ApiCase):
             return cls.embedder
         cls.settings_obj = Settings(database_url=cls.database_url(), storage_dir=str(cls.storage), dense_mode=cls.dense_mode,
                                     retrieval_mode=cls.retrieval_mode, max_upload_bytes=512 * 1024, max_batch_files=8,
-                                    jobs_mode=cls.jobs_mode)
+                                    jobs_mode=cls.jobs_mode, **cls.extra_settings)
         cls.index = IndexManager(cls.settings_obj, embedder_factory=factory)
         cls.llm = RecordingLLM()
         backend = RagBackend(index=cls.index, llm_factory=lambda: cls.llm, mode=cls.retrieval_mode,

@@ -27,7 +27,7 @@ from .audit import install_log_filter
 from .db import init_db, make_engine, make_sessionmaker
 from .deps import ApiError
 from .rag_backend import AnswerCache, RagBackend
-from .routers import admin, audit_log, auth, chat, documents, knowledge
+from .routers import admin, audit_log, auth, chat, documents, knowledge, ops
 from .settings import Settings
 from contextlib import asynccontextmanager
 
@@ -40,6 +40,9 @@ TAGS = [
     {"name": "documents", "description": "文档上传、批量上传、版本、处理状态、Chunk、停用/启用/删除"},
     {"name": "index", "description": "索引代际状态与重建（平台管理员）"},
     {"name": "jobs", "description": "后台任务：进度查询、取消、重试"},
+    {"name": "operations", "description": "运营指标与页面访问记录"},
+    {"name": "faq", "description": "FAQ 挖掘、审核、发布、下线"},
+    {"name": "gaps", "description": "知识缺口与知识补充任务"},
     {"name": "chat", "description": "会话与带 ACL 的知识库问答"},
     {"name": "audit", "description": "审计日志（平台管理员）"},
 ]
@@ -121,7 +124,7 @@ def create_app(settings: Optional[Settings] = None, backend: Optional[RagBackend
     def health():
         return {"status": "ok", "version": __version__}
 
-    for r in (auth.router, admin.router, knowledge.router, documents.router, chat.router, audit_log.router):
+    for r in (auth.router, admin.router, knowledge.router, documents.router, chat.router, audit_log.router, ops.router):
         app.include_router(r)
     _mount_frontend(app)
     return app

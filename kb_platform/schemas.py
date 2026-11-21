@@ -377,6 +377,8 @@ class AskOut(BaseModel):
     citations: List[Citation]
     status: str
     notice: Optional[str] = None
+    source: str = "rag"               # P5: rag | answer_cache | faq | none
+    faq_id: Optional[str] = None
 
 
 # --- audit / errors -----------------------------------------------------------------------------------------------
