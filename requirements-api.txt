@@ -1,0 +1,7 @@
+# Knowledge platform backend (kb_platform/, phase 2). Install into a separate venv: python -m venv .venv
+fastapi==0.141.1
+pydantic==2.13.4
+sqlalchemy>=2.0,<2.1
+httpx==0.28.1        # FastAPI TestClient (API tests)
+uvicorn==0.52.0      # local server
+pyyaml==6.0.3

@@ -51,7 +51,25 @@ python -m ragas_eval.kb_service --user eng_alice "发布前需要做哪些检查
 | `blocked` | 权限闸门拦截（例如问题中伪造了资料块）；不调用模型 |
 | 关闭安全层无效 | 设计如此：kb_service 忽略 `--no-safety` / `RAG_SAFETY_LAYER=off`，见审计中的 `override_attempts_ignored` |
 
+## 知识库后端（kb_platform）
+
+```powershell
+.venv\Scripts\python -m pip install -r requirements-api.txt
+$env:KB_DATABASE_URL="sqlite:///./build/kb_platform.db"
+.venv\Scripts\python -m kb_platform.cli create-admin --username admin   # 需先设置 KB_ADMIN_PASSWORD
+.venv\Scripts\python -m uvicorn kb_platform.app:create_app --factory --port 8000
+```
+
+| 现象 | 处理 |
+|---|---|
+| 登录总是 401 | 用户名或密码错误、账号已停用或已被锁定（连续失败 5 次，锁定 15 分钟），几种情况返回同一条消息；看审计 `auth.login` |
+| 修改用户后要求重新登录 | 设计如此：角色、部门、密级、启用状态或密码变更后，旧 Token 立即失效 |
+| 问答返回 `access_denied` | 用户在该知识库中没有可读文档，或 ACL 配置错误（审计中 `reason=policy_error`） |
+| 503 `index_unavailable` | `RAG_DATA_DIR` 下没有 Dense 和 BM25 索引 |
+| 历史回答显示“内容已隐藏” | 该回答生成后用户的权限或文档 ACL 已变更 |
+
 ## 测试
 
 - `python -m unittest discover -s ragas_eval/tests -t .`：软件测试，与 CI 相同。
+- `.venv\Scripts\python -m unittest discover -s kb_platform/tests -t .`：知识库后端 API 测试（CI 中同样运行）。
 - `python -m unittest discover -s tests_local -t .`：本地重型集成测试，需要 bge-m3 和 Ollama，不在 CI 中运行。

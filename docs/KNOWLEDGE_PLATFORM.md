@@ -7,7 +7,8 @@
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | 第一阶段 | ACL 权限管理：身份模型、文档级策略、默认拒绝、检索候选阶段过滤、强制安全层、隔离测试 | **已完成**（本分支） |
-| 第二阶段 | 平台化：策略管理 API、文档入库流程带策略、审计日志持久化、多租户索引 | 待开始 |
+| 第二阶段 | 企业知识库后端：FastAPI + Pydantic + SQLAlchemy（SQLite），认证、身份与 ACL 持久化、知识库/文档 API、ACL 问答 API、会话隔离、审计、OpenAPI、API 测试 | **已完成**（本分支） |
+| 第二阶段遗留 | Alembic 迁移与 PostgreSQL 验证、OIDC/SSO、文档入库 API、按租户建索引等（见下文） | 待开始 |
 | 第三阶段 | 接入 4.1 RAG 模型微调实验（在 ACL 约束下构造训练/评估数据） | 待开始 |
 
 ## 第一阶段：ACL 权限管理
@@ -87,15 +88,85 @@
 - 用户目录是 JSON 文件，尚未对接 LDAP、SSO 或 IAM，也没有身份认证（调用方需要自行完成认证，再传入 `user_id`）。
 - `tests_local/` 中的重型集成测试（bge-m3 + Ollama）本阶段没有新增 ACL 用例，本机也没有运行。
 
-## 第二阶段：平台化（下一步）
+## 第二阶段：企业知识库后端（kb_platform）
 
-1. 策略管理：策略的版本化存储、变更审核（双人复核）、变更后立即使授权范围失效（`policy_sha256` 已包含在 `cache_key` 中）。
-2. 入库流程带策略：新文档没有策略时保持默认拒绝，并在入库报告中列出“未配置策略”的文档；可选按 `owner_department` 生成默认策略草稿，草稿需要人工批准后才生效。
-3. 审计日志持久化：记录每次请求的用户、策略版本、授权计数、是否拦截，不记录无权文档的信息。
-4. 身份对接：用 OIDC/SSO 的 claims 映射角色和部门；服务端校验 token，不信任客户端自报的身份。
-5. 按租户或密级分别建索引，消除全库 IDF 的影响；评估性能。
-6. 让 `retrieval_eval` 支持 ACL：按用户统计 Recall 和泄漏数（目标是泄漏数为 0）。
-7. 增加 `tests_local` 的 ACL 集成用例（真实 bge-m3 Dense + Ollama）。
+### 技术选型与结构
+
+FastAPI + Pydantic v2 + SQLAlchemy 2.0，默认 SQLite（`KB_DATABASE_URL`，测试使用内存库）。模型只用可移植的列类型（String、Integer、Boolean、Text、DateTime(timezone)、JSON），切换到 PostgreSQL 只需改 `KB_DATABASE_URL`（需要另装驱动，尚未实测）。依赖见 `requirements-api.txt`，安装在独立的 `.venv` 中，不影响原有环境。
+
+| 文件 | 作用 |
+|---|---|
+| `kb_platform/models.py` | 用户、角色、部门、知识库、文档、文档授权（allow/deny × user/role/department/all_authenticated）、Token（只存哈希）、会话、消息、审计日志、ACL 版本号 |
+| `kb_platform/security.py` | scrypt 密码哈希；随机不透明 Token，库中只存 SHA-256；过期、注销、停用即失效；连续失败锁定 |
+| `kb_platform/acl_store.py` | 数据库 → 第一阶段 `AclPolicy`：每次请求只包含**当前用户**和**当前知识库的有效文档**；配置错误抛出 `PolicyError`，调用方一律拒绝 |
+| `kb_platform/rag_backend.py` | 唯一的问答通道：第一阶段 `KnowledgeBaseService`（候选阶段 ACL + 强制安全层）；答案缓存的键为（主体指纹 + 策略哈希, 知识库, 问题哈希） |
+| `kb_platform/audit.py` | 审计写入（白名单字段，问题只存哈希和长度）；日志过滤器屏蔽 Bearer Token、password/token 键值和 Token 形状的字符串 |
+| `kb_platform/routers/*.py` | auth / admin / knowledge / chat / audit 五组路由 |
+| `kb_platform/app.py` | 应用工厂、统一错误格式、请求 ID、`Cache-Control: no-store` |
+| `kb_platform/cli.py` | `init-db`、`create-admin`（管理员只能用 CLI 创建）、`seed-example`（导入合成用户，随机密码只写入本地文件）、`export-openapi` |
+| `docs/openapi.json` | OpenAPI 快照；有测试保证它与代码一致 |
+
+### API 清单（前缀 `/api/v1`）
+
+| 方法 | 路径 | 权限 | 说明 |
+|---|---|---|---|
+| GET | `/health` | 公开 | 健康检查，不含数据 |
+| POST | `/auth/login` | 公开 | 用户名密码登录，返回 Bearer Token；各种失败返回同一条消息 |
+| POST | `/auth/logout` | 登录 | 注销当前 Token |
+| GET | `/auth/me` | 登录 | 当前身份（只来自 Token） |
+| POST | `/auth/password` | 登录 | 修改密码，所有 Token 失效 |
+| POST/GET | `/admin/roles` | 管理员 | 创建 / 列出角色 |
+| POST/GET | `/admin/departments` | 管理员 | 创建 / 列出部门 |
+| POST/GET | `/admin/users` | 管理员 | 创建 / 列出用户 |
+| GET/PATCH | `/admin/users/{username}` | 管理员 | 查看；修改角色、部门、密级、启用状态、重置密码（旧 Token 失效）。`is_admin` 不能通过 API 修改 |
+| POST/GET | `/knowledge-bases` | 创建：管理员；列表：登录 | 普通用户只看到至少有一篇可读文档的知识库 |
+| GET | `/knowledge-bases/{kb_id}` | 登录 | 不可见时返回 404 |
+| POST/GET | `/knowledge-bases/{kb_id}/documents` | 登记：管理员；列表：登录 | 新文档没有任何授权（默认拒绝）；普通用户只看到可读文档 |
+| GET/PATCH | `/documents/{doc_id}` | 查看：登录；修改/归档：管理员 | 无权限与不存在返回相同的 404 |
+| GET/PUT | `/documents/{doc_id}/acl` | 管理员 | 查看 / 整体替换 ACL；主体必须已存在，不允许通配符 |
+| POST/GET | `/sessions` | 登录 | 在可读知识库中创建会话 / 只列出自己的会话 |
+| GET/DELETE | `/sessions/{id}` | 会话所有者 | 他人会话返回 404；权限变更前生成的回答会被隐藏 |
+| POST | `/sessions/{id}/ask` | 会话所有者 | ACL 问答，只返回 answer / citations / status |
+| GET | `/audit` | 管理员 | 审计日志，可按 action、actor 过滤 |
+
+交互式文档：`/docs`（Swagger UI）、`/redoc`、`/openapi.json`。
+
+### 安全设计与验证
+
+| 要求 | 实现 | 测试 |
+|---|---|---|
+| 不能通过请求参数指定其他用户 | 身份只来自 Bearer Token；请求体 `extra="forbid"`（带 `user_id`、`roles`、`clearance` 一律返回 422）；查询参数和 `X-User-Id` 等请求头被忽略 | `TestNoIdentitySpoofing` |
+| 不能绕过 ACL 调用旧入口 | `kb_platform` 中没有任何模块导入 `rag_service`（AST 检查）；后端只构造 `KnowledgeBaseService`；`RAG_SAFETY_LAYER=off` 无效 | `TestLegacyEntryNotExposed`、`test_safety_layer_cannot_be_switched_off` |
+| 未授权信息不进入 Prompt、引用、错误信息 | 复用第一阶段的候选阶段过滤和两道闸门；元数据也按 ACL 过滤；校验错误不回显输入；500 只返回通用消息，日志只记录异常类型 | `TestQuestionAnswering`、`TestMetadataVisibility`、`TestErrorHygiene` |
+| 缓存和会话按用户与权限范围隔离 | 缓存键包含主体指纹和策略哈希，权限变化后键随之改变；会话绑定所有者；历史回答带 scope_key，权限变化后隐藏 | `TestCacheAndSessionIsolation`、`test_revocation_takes_effect_and_hides_old_answers` |
+| 权限配置错误时默认拒绝 | 库中出现非法授权类型或密级时 `PolicyError` → 整个知识库对所有人不可见，问答返回 `access_denied`，审计记录 `policy_error` | `test_broken_configuration_fails_closed` |
+| 日志中不出现 Token、密钥、敏感原文 | 审计字段白名单；问题只存哈希；失败登录只记录**已存在的**用户名（误把密码输入到用户名框时不会被记录）；日志过滤器 | `TestLogsAndAudit` |
+
+测试发现并已修复：失败登录最初会把用户名框中的任意内容写入审计，而随机生成的密码恰好也符合用户名格式。现在只记录数据库中存在的用户名。
+
+### 本地运行
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements-api.txt
+.venv\Scripts\python -m unittest discover -s kb_platform/tests -t .
+$env:KB_ADMIN_PASSWORD="<至少10位，含字母和数字>"
+.venv\Scripts\python -m kb_platform.cli create-admin --username admin
+.venv\Scripts\python -m kb_platform.cli seed-example
+.venv\Scripts\python -m uvicorn kb_platform.app:create_app --factory --port 8000
+```
+
+真实问答还需要 `RAG_DATA_DIR` 指向包含 Dense 索引的数据目录（`python scripts/build_example_index.py --docs examples/acl_corpus/docs --out build/acl_example_data --dense`）、本机 bge-m3（需要安装 sentence-transformers）和运行中的 Ollama。没有这些时，问答接口返回 503 `index_unavailable`，其余接口照常可用。
+
+### 第二阶段遗留问题
+
+1. 数据库迁移：目前使用 `create_all`，还需要引入 Alembic，并在真实 PostgreSQL 上运行一遍测试。
+2. 身份：本地账号 + 不透明 Token；尚未对接 OIDC/SSO，没有 MFA，登录接口除按账号锁定外没有按 IP 限流。
+3. 文档入库：API 只管理元数据；索引仍需离线用 `scripts/build_example_index.py` 构建。登记的 `doc_key` 必须与索引中的 `source_file` 一致，没有登记的索引文档对所有人不可见。
+4. 检索器是进程内共享对象，请求在锁内串行执行；多副本部署时，每个进程各自加载索引，答案缓存也是进程内的（不跨进程共享，因此不会串用，但命中率会下降）。
+5. 会话历史在数据库中保存问题和回答原文（这是用户自己的数据，不是日志）；尚未实现保留期限和加密存储。
+6. 按租户或密级分别建索引、`retrieval_eval` 支持 ACL、`tests_local` 增加真实模型的 ACL 用例，仍未完成。
+7. 真实 bge-m3 + Ollama 的端到端问答在本机没有验证（缺少 sentence-transformers 和模型）；已用真实 uvicorn + HTTP + 合成语料 + 模拟 LLM 完成冒烟测试。
 
 ## 第三阶段：接入 4.1 RAG 模型微调实验
 

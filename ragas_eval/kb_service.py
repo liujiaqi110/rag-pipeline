@@ -73,7 +73,10 @@ def _redact(obj: Any, foreign: set) -> Any:
 
 
 class KnowledgeBaseService:
-    def __init__(self, policy: AclPolicy, retriever: Any = None, llm: Any = None, mode: str = DEFAULT_MODE):
+    def __init__(self, policy: AclPolicy, retriever: Any = None, llm: Any = None, mode: str = DEFAULT_MODE,
+                 lock: Optional[Any] = None):
+        """``lock``: pass one shared lock when several service instances (e.g. one per request/policy) use the same
+        base retriever, so its caches are never used by two requests at once."""
         if not isinstance(policy, AclPolicy):
             raise TypeError("an AclPolicy is required (the knowledge platform never runs without ACL)")
         if retriever is None:
@@ -87,7 +90,7 @@ class KnowledgeBaseService:
         ids, src = getattr(retriever, "ids", None), getattr(retriever, "src", None)
         self.dense_sources = dict(zip(ids, src)) if ids is not None and src is not None else None
         self.all_ids = set(self.chunk_sources) | set(self.dense_sources or ())
-        self._lock = threading.Lock()  # base retriever caches are shared objects: one request at a time
+        self._lock = lock or threading.Lock()  # base retriever caches are shared objects: one request at a time
 
     def scope_for(self, user_id: str) -> AccessScope:
         return build_scope(self.policy, user_id, self.chunk_sources, self.dense_sources)
