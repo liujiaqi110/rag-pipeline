@@ -106,6 +106,16 @@ cd ..
 | 所有用户都被要求重新登录 | `KB_JWT_SECRET` 或 `KB_STORAGE_DIR/secrets/jwt_hs256.key` 发生了变化（旧 JWT 全部失效） |
 | 升级后数据库报错 | `python -m kb_platform.cli db-current` 查看当前版本；迁移不会删除数据，失败时整个迁移回滚 |
 
+### 知识运营（第五阶段）
+
+| 现象 | 处理 |
+|---|---|
+| 挖掘结果显示“新增候选 0” | 问答量没达到频次阈值，或问题没有经过 RAG 回答（拒答、FAQ 命中的问题不参与）；可以在挖掘弹窗中降低阈值 |
+| FAQ 候选列表里看不到某条 | 你不能阅读它的全部证据文档（列表顶部会显示被隐藏的数量）；需要由有阅读权限的知识库管理者审核 |
+| 已发布 FAQ 不再命中 | 查看“证据”列：文档已更新、停用或删除，或提问用户已没有权限；文档更新后需要重新挖掘、审核 |
+| 缺口验证一直未通过 | 补充的文档必须给当初的提问用户授权（验证以他们当前的权限进行） |
+| 相关阈值 | `KB_FAQ_MATCH_THRESHOLD`（0.86）、`KB_FAQ_CLUSTER_THRESHOLD`（0.80）、`KB_FAQ_MIN_FREQUENCY`（3）、`KB_GAP_MERGE_THRESHOLD`（0.85）、`KB_GAP_REPEAT_THRESHOLD`（3）、`KB_LOW_RELEVANCE_THRESHOLD`（0.35）、`KB_KNOWLEDGE_MAX_AGE_DAYS`（365） |
+
 ## 测试
 
 - `python -m unittest discover -s ragas_eval/tests -t .`：软件测试，与 CI 相同。

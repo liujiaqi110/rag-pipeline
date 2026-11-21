@@ -131,6 +131,8 @@ $env:RAG_DATA_DIR="D:\my_rag_data"
 
 第四阶段增加浏览器工作台 `frontend/`（Vue 3 + TypeScript + Element Plus），包括登录、知识管理、权限管理、SSE 流式问答和平台管理页面；后端引入 Alembic 迁移、可撤销 JWT 和后台任务。运行方法见 [docs/RUNBOOK.md](docs/RUNBOOK.md)，设计与测试结果见 [docs/KNOWLEDGE_PLATFORM.md](docs/KNOWLEDGE_PLATFORM.md)。
 
+第五阶段增加知识运营：运营看板（统计口径明确，数据来自服务日志）、FAQ 自动挖掘（bge-m3 聚类）与人工审核发布、FAQ 优先应答（按权限、文档版本和索引代际失效）、知识缺口识别与补充任务验证。
+
 ## 8. 测试与 CI
 
 ```powershell

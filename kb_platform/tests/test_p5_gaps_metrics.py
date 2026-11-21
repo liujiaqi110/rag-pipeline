@@ -127,6 +127,23 @@ class TestGaps(GapCase):
         self.assertIsNone(ev[-1].gap_type)
         self.assertEqual(len(self.gaps()), before)                         # neither became a knowledge gap
 
+    def test_restricted_knowledge_is_permission_not_gap(self):
+        """The answer exists, but only in a document the asker may not read → permission (restricted_knowledge),
+        no gap; the user still just gets a refusal that does not hint at the document."""
+        d = self.upload("hrpay.md", md_doc("薪资发放", "CANARY-PAY", "薪资发放日期")).json()["document"]["id"]
+        self.grant(d, departments=["hr"])
+        before = len(self.gaps())
+        self.llm.responder = lambda m: REFUSAL
+        r = self.ask("eng_alice", "薪资发放日期是哪天？").json()
+        self.assertEqual(r["status"], "refused")
+        self.assertNotIn("CANARY-PAY", json.dumps(r, ensure_ascii=False))
+        self.assertNotIn("hrpay", json.dumps(r, ensure_ascii=False))
+        ev = self.events()[-1]
+        self.assertEqual((ev.outcome, ev.error_code, ev.gap_type), ("permission", "restricted_knowledge", None))
+        self.assertEqual(len(self.gaps()), before)
+        m = self.client.get("/api/v1/ops/metrics", headers=self.h(ADMIN)).json()
+        self.assertGreaterEqual(m["restricted_knowledge"], 1)
+
     def test_stale_knowledge_filters_and_isolation(self):
         with self.factory() as db:
             v = db.scalar(select(DocumentVersion).where(DocumentVersion.document_id == type(self)._base_id))

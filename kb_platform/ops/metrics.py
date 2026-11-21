@@ -23,7 +23,8 @@ DEFINITIONS = {
     "faq_hits": "FAQ 命中次数：source=faq 的提问数；也等于节省的模型调用次数",
     "answer_cache_hits": "答案缓存命中次数：source=answer_cache 的提问数（同一用户权限范围内的重复问题）",
     "failed": "失败请求：outcome 为 generation_failure（模型失败）或 infrastructure（检索/索引/服务故障）的提问",
-    "permission_denied": "权限受限：outcome=permission（无可读文档、策略错误或权限闸门拦截），不算知识缺口",
+    "permission_denied": "权限受限：outcome=permission（无可读文档、策略错误、权限闸门拦截，或答案只存在于用户无权阅读的"
+                         "文档中 restricted_knowledge），不算知识缺口；该判断只用于统计，不会告知提问用户",
     "knowledge_gap_events": "知识缺口事件：outcome=knowledge_gap 的提问，或回答但引用知识过期（stale_knowledge）",
     "faq_hit_rate": "FAQ 命中率 = faq_hits / questions",
     "tokens": "Token：本地模型返回的 prompt_eval_count / eval_count 之和，只统计真实调用",
@@ -151,6 +152,7 @@ def compute(db: Session, days: int = 14, kb_ids: Optional[List[str]] = None, now
         "faq": {"hits": faq_hits, "hit_rate": round(faq_hits / n, 4) if n else 0.0, "saved_llm_calls": faq_hits,
                 "answer_cache_hits": by_src.get("answer_cache", 0),
                 "by_status": dict(Counter(f.status for f in faqs))},
+        "restricted_knowledge": sum(e.error_code == "restricted_knowledge" for e in events),
         "failures": {"failed": by_outcome.get("generation_failure", 0) + by_outcome.get("infrastructure", 0),
                      "generation_failure": by_outcome.get("generation_failure", 0),
                      "infrastructure": by_outcome.get("infrastructure", 0),

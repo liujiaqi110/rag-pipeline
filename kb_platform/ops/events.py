@@ -6,7 +6,11 @@ Outcome classes are kept strictly apart (they are NOT all "gaps"):
     knowledge_gap       refused / insufficient_evidence / insufficient_scoped_evidence with documents the user CAN read
                         gap_type: no_evidence (nothing retrieved) | low_relevance (best dense score < threshold)
                                   | insufficient_evidence (context retrieved, model could not answer from it)
-    permission          access_denied / blocked (no readable document, policy error, ACL gate) — never a gap
+    permission          access_denied / blocked (no readable document, policy error, ACL gate) — never a gap;
+                        also an unanswered question whose best evidence lies in documents the user may NOT read
+                        (error_code ``restricted_knowledge``): the knowledge exists, access is the issue. Decided
+                        server-side for operations statistics only — the user's answer is unchanged and never hints
+                        at the restricted document
     generation_failure  generation_error (model failed)                                     — never a gap
     infrastructure      retrieval_error, index_unavailable, dense_unavailable, internal errors — never a gap
 
@@ -47,6 +51,28 @@ def classify(status: str, retrieved: int, top_score: Optional[float], low_thresh
     return "answered", None
 
 
+RESTRICTED_MARGIN = 0.05
+
+
+def restricted_evidence(backend: Any, policy: Any, username: str, retriever: Any, question: str,
+                        authorised_top: Optional[float], threshold: float) -> bool:
+    """True if the most relevant chunk in the WHOLE index belongs to a document outside the user's scope and is
+    clearly more relevant than anything the user can read."""
+    if retriever is None or not getattr(retriever, "has_dense", False):
+        return False
+    try:
+        svc = backend.service(policy, retriever)
+        scope = svc.scope_for(username)
+        best = retriever.dense(question, None, 1)            # unrestricted — result never leaves this function
+        if not best:
+            return False
+        cid, score = best[0]["chunk"]["chunk_id"], float(best[0]["dense_score"])
+        return (not scope.allows_chunk(cid) and score >= threshold
+                and score - (authorised_top or 0.0) >= RESTRICTED_MARGIN)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def top_dense_score(backend: Any, policy: Any, username: str, retriever: Any, question: str) -> Optional[float]:
     """Best authorised dense similarity (only computed for unanswered questions; None without a Dense index)."""
     if retriever is None or not getattr(retriever, "has_dense", False):
@@ -84,6 +110,9 @@ def record(db: Session, *, settings: Any, backend: Any, user: Any, kb_id: str, q
     if status in GAP_STATUSES and retrieved > 0 and policy is not None:
         top = top_dense_score(backend, policy, user.username, retriever, question)
     outcome, gap_type = classify(status, retrieved, top, settings.low_relevance_threshold, error_code)
+    if outcome == "knowledge_gap" and policy is not None and restricted_evidence(
+            backend, policy, user.username, retriever, question, top, settings.low_relevance_threshold):
+        outcome, gap_type, error_code = "permission", None, "restricted_knowledge"
     if outcome == "answered" and source != "faq" and stale_citations(db, citations or [], settings.knowledge_max_age_days):
         gap_type = "stale_knowledge"
     ev = QaEvent(user_id=user.id, kb_id=kb_id, session_id=session_id, message_id=message_id,
