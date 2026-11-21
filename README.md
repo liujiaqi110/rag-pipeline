@@ -99,6 +99,13 @@ $env:RAG_DATA_DIR="D:\my_rag_data"
 | 新 Prompt 未通过回归门禁 | rag_v1.1 新增可答题误拒，并出现模板泄漏，因此未采用 | 同上 |
 | 安全层离线回归（260 条历史输出） | 11 条无效引用全部拦截（其中 4 条是旧校验漏掉的）；合法引用误删 0 条；完全拒答清理 14 条 | 同上 |
 
+**指标口径说明**：研究实验与公开示例的 Recall@K 计算方式不同。
+
+- 研究版：对每个充分证据集合分别计算 top-K 的 Chunk 覆盖比例，取其中的最大值；
+- 公开示例版（`ragas_eval/retrieval_metrics.py`）：取全部标注相关 Chunk 的并集 R，计算 |R ∩ top-K| / |R|；
+- 存在多种等价证据组时，两者的数值可能不同，因此**不能直接横向比较**两套实验的 Recall@K；
+- 判断多证据问题的证据是否完整，请同时参考 FullCov@K（研究版）或 SlotFullCov@K（公开示例版）。示例见 [docs/EVALUATION.md](docs/EVALUATION.md)。
+
 失败归因见 [failure_analysis.md](docs/experiments/failure_analysis.md)，局限见 [limitations.md](docs/experiments/limitations.md)。
 
 **本项目没有 RAGAS 自动评估，也不报告 Faithfulness 或 Answer Relevancy 分数。** 包名 `ragas_eval` 是历史遗留。
