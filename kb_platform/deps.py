@@ -49,6 +49,7 @@ def current_user(request: Request, cred: HTTPAuthorizationCredentials | None = D
         raise ApiError(401, "unauthenticated", "登录已失效，请重新登录", {"WWW-Authenticate": "Bearer"})
     user, tok = res
     request.state.actor = user.username
+    request.state.raw_token = cred.credentials   # in memory only (SSE re-validation); never logged or stored
     request.state.token_id = tok.id
     return user
 

@@ -41,6 +41,48 @@ class MeOut(BaseModel):
     departments: List[str]
     clearance: int
     is_admin: bool
+    managed_kb_ids: List[str] = []   # UI hint only: every operation is re-authorised by the backend
+
+
+class DepartmentIn(Req):
+    name: str = Field(pattern=NAME)
+    description: str = Field(default="", max_length=255)
+    parent: Optional[str] = Field(default=None, pattern=NAME)
+
+
+class DepartmentUpdateIn(Req):
+    description: Optional[str] = Field(default=None, max_length=255)
+    parent: Optional[str] = Field(default=None, pattern=NAME)
+    clear_parent: bool = False
+
+
+class DepartmentOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    parent: Optional[str] = None
+
+
+class CitationDetailOut(BaseModel):
+    chunk_id: str
+    document_id: str
+    document_title: str
+    source: str
+    version_no: int
+    page: Optional[int] = None
+    paragraph: Optional[int] = None
+    section_heading: Optional[str] = None
+    text: str
+
+
+class SystemStatusOut(BaseModel):
+    version: str
+    database: dict
+    jobs: dict
+    index: dict
+    embedder: dict
+    llm: dict
+    settings: dict
 
 
 class ChangePasswordIn(Req):

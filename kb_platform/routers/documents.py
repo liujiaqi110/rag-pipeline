@@ -22,7 +22,7 @@ from ..deps import ApiError, admin_user, current_user, get_db, manager_user, not
 from ..ingest.errors import IngestError
 from ..ingest.manager import INDEXABLE, Ingestor, safe_filename
 from ..models import Chunk, Document, DocumentVersion, IndexGeneration, Job, User
-from ..schemas import (NAME, BatchItem, BatchOut, ChunkListOut, ChunkOut, Classification, DocumentOut,
+from ..schemas import (NAME, BatchItem, CitationDetailOut, SystemStatusOut, BatchOut, ChunkListOut, ChunkOut, Classification, DocumentOut,
                        DocumentStatusOut, ErrorOut, GenerationOut, IndexInfo, IndexStatusOut, JobOut, UploadOut,
                        VersionOut)
 from .knowledge import managed_doc, managed_kb, visible_doc
@@ -409,3 +409,57 @@ def retry_job(job_id: str, request: Request, user: User = Depends(manager_user),
     audit(db, action="job.retry", outcome="queued", actor=user.username, resource=j.id, request_id=request_id(request))
     db.expire_all()
     return [db.get(Job, x.id) for x in jobs]
+
+
+# --- workbench helpers (P4) -----------------------------------------------------------------------------------------
+@router.get("/knowledge-bases/{kb_id}/chunks/{chunk_id}", response_model=CitationDetailOut, responses=ERR,
+            tags=["chat"], summary="引用来源：返回 Chunk 原文与位置（仅当前版本、仅可读文档；否则 404）")
+def citation_detail(kb_id: str, chunk_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..acl_store import kb_by_id
+    kb = kb_by_id(db, kb_id)
+    if kb is None or not isinstance(chunk_id, str) or len(chunk_id) > 32:
+        raise not_found()
+    readable = {d.id: d for d in readable_documents(db, user, kb)[0]}
+    for d in readable.values():
+        if not d.current_version_id:
+            continue
+        c = db.scalar(select(Chunk).where(Chunk.version_id == d.current_version_id, Chunk.chunk_id == chunk_id))
+        if c is not None:
+            v = db.get(DocumentVersion, d.current_version_id)
+            return CitationDetailOut(chunk_id=c.chunk_id, document_id=d.id, document_title=d.title or d.doc_key,
+                                     source=d.doc_key, version_no=v.version_no, page=c.page, paragraph=c.paragraph,
+                                     section_heading=c.section_heading, text=c.text)
+    raise not_found()
+
+
+@router.get("/system/status", response_model=SystemStatusOut, responses=ERR, tags=["index"],
+            summary="系统健康：数据库与迁移版本、后台任务、索引、向量模型、大模型服务（平台管理员）")
+def system_status(request: Request, admin: User = Depends(admin_user), db: Session = Depends(get_db)):
+    from sqlalchemy import func, text
+    from .. import __version__, migrate
+    app = request.app
+    try:
+        db.execute(text("SELECT 1"))
+        dbinfo = {"ok": True, "dialect": app.state.engine.dialect.name, "revision": migrate.current(app.state.engine),
+                  "head": migrate.head()}
+    except Exception:  # noqa: BLE001
+        dbinfo = {"ok": False}
+    jobs = {s: n for s, n in db.execute(select(Job.status, func.count()).group_by(Job.status))}
+    backend = app.state.backend
+    if backend.external:
+        index, embedder = {"mode": "external"}, {"available": None}
+    else:
+        g = backend.index.active_generation(db)
+        index = {"mode": "platform", "active_generation": g.id if g else None, "chunks": g.chunk_count if g else 0,
+                 "documents": g.document_count if g else 0, "dense": g.dense if g else None,
+                 "dense_error": g.dense_error if g else None}
+        embedder = backend.index.embedder_status()
+    try:
+        info = backend.llm().model_info()
+        llm = {"available": True, "model": info.get("model"), "version": info.get("ollama_version")}
+    except Exception as e:  # noqa: BLE001 — only the class / kind, never the message
+        llm = {"available": False, "reason": getattr(e, "kind", type(e).__name__)}
+    st = app.state.settings
+    return SystemStatusOut(version=__version__, database=dbinfo, jobs=jobs, index=index, embedder=embedder, llm=llm,
+                           settings={"retrieval_mode": backend.mode, "dense_mode": st.dense_mode,
+                                     "token_format": st.token_format, "jobs_mode": st.jobs_mode})

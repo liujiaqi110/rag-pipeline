@@ -101,15 +101,23 @@ class RagBackend:
                     self._lf = OllamaClient
                 self._llm = self._lf()
 
-    def service(self, policy: AclPolicy, retriever: Any = None) -> KnowledgeBaseService:
+    def llm(self):
+        self._ensure(need_retriever=False)
+        return self._llm
+
+    def service(self, policy: AclPolicy, retriever: Any = None, llm: Any = None) -> KnowledgeBaseService:
         self._ensure(need_retriever=retriever is None)
         return KnowledgeBaseService(policy, retriever=retriever if retriever is not None else self._retriever,
-                                    llm=self._llm, mode=self.mode, lock=self.request_lock)
+                                    llm=llm if llm is not None else self._llm, mode=self.mode, lock=self.request_lock)
 
     def ask(self, policy: AclPolicy, username: str, kb_id: str, question: str, retriever: Any = None,
-            generation: str = "external") -> Tuple[Dict[str, Any], Dict[str, Any], bool]:
-        """Returns (user_response, audit_summary, cached). The phase-1 audit block is reduced to counts here."""
-        svc = self.service(policy, retriever)
+            generation: str = "external", llm_wrapper: Optional[Callable[[Any], Any]] = None
+            ) -> Tuple[Dict[str, Any], Dict[str, Any], bool]:
+        """Returns (user_response, audit_summary, cached). The phase-1 audit block is reduced to counts here.
+        ``llm_wrapper(llm)`` (P4 streaming) wraps the shared LLM for this request only; the phase-1 PromptGuard
+        still sits in front of it, so nothing unauthorised can reach the wrapped model either."""
+        self._ensure(need_retriever=retriever is None)
+        svc = self.service(policy, retriever, llm_wrapper(self._llm) if llm_wrapper else None)
         scope = svc.scope_for(username)
         key = AnswerCache.key(scope.cache_key, f"{kb_id}@{generation}", question)
         hit = self.cache.get(key)

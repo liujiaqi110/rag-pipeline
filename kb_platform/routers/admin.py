@@ -15,7 +15,7 @@ from ..acl_store import bump_acl_version
 from ..audit import audit
 from ..deps import ApiError, admin_user, get_db, not_found, request_id
 from ..models import Department, Role, User
-from ..schemas import ErrorOut, NamedIn, NamedOut, UserCreateIn, UserOut, UserUpdateIn
+from ..schemas import DepartmentIn, DepartmentOut, DepartmentUpdateIn, ErrorOut, NamedIn, NamedOut, UserCreateIn, UserOut, UserUpdateIn
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 ERR = {401: {"model": ErrorOut}, 403: {"model": ErrorOut}, 404: {"model": ErrorOut}, 409: {"model": ErrorOut},
@@ -61,7 +61,68 @@ def _named(model: Type, kind: str, label: str):
 
 
 _named(Role, "role", "角色")
-_named(Department, "department", "部门")
+
+
+def _dept_out(db: Session, d: Department) -> DepartmentOut:
+    parent = db.get(Department, d.parent_id) if d.parent_id else None
+    return DepartmentOut(id=d.id, name=d.name, description=d.description, parent=parent.name if parent else None)
+
+
+def _would_cycle(db: Session, d: Department, parent: Department) -> bool:
+    cur, seen = parent, set()
+    while cur is not None and cur.id not in seen:
+        if cur.id == d.id:
+            return True
+        seen.add(cur.id)
+        cur = db.get(Department, cur.parent_id) if cur.parent_id else None
+    return False
+
+
+@router.post("/departments", response_model=DepartmentOut, status_code=201, responses=ERR,
+             summary="创建部门（可指定上级部门）。部门树只用于组织管理，ACL 不沿部门树继承", name="create_department")
+def create_department(body: DepartmentIn, request: Request, admin: User = Depends(admin_user), db: Session = Depends(get_db)):
+    parent = db.scalar(select(Department).where(Department.name == body.parent)) if body.parent else None
+    if body.parent and parent is None:
+        raise ApiError(422, "unknown_department", f"不存在的部门：{body.parent}")
+    d = Department(name=body.name, description=body.description, parent_id=parent.id if parent else None)
+    db.add(d)
+    try:
+        bump_acl_version(db)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise ApiError(409, "conflict", "部门已存在")
+    audit(db, action="admin.department.create", outcome="success", actor=admin.username, resource=body.name,
+          request_id=request_id(request))
+    return _dept_out(db, d)
+
+
+@router.get("/departments", response_model=List[DepartmentOut], responses=ERR, summary="部门列表（含上级部门）",
+            name="list_departments")
+def list_departments(admin: User = Depends(admin_user), db: Session = Depends(get_db)):
+    return [_dept_out(db, d) for d in db.scalars(select(Department).order_by(Department.name))]
+
+
+@router.patch("/departments/{name}", response_model=DepartmentOut, responses=ERR, summary="修改部门描述或上级部门")
+def update_department(name: str, body: DepartmentUpdateIn, request: Request, admin: User = Depends(admin_user),
+                      db: Session = Depends(get_db)):
+    d = db.scalar(select(Department).where(Department.name == name))
+    if d is None:
+        raise not_found()
+    if body.description is not None:
+        d.description = body.description
+    if body.clear_parent:
+        d.parent_id = None
+    elif body.parent is not None:
+        p = db.scalar(select(Department).where(Department.name == body.parent))
+        if p is None:
+            raise ApiError(422, "unknown_department", f"不存在的部门：{body.parent}")
+        if _would_cycle(db, d, p):
+            raise ApiError(422, "department_cycle", "上级部门不能是自己或自己的下级")
+        d.parent_id = p.id
+    audit(db, action="admin.department.update", outcome="success", actor=admin.username, resource=name,
+          request_id=request_id(request))
+    return _dept_out(db, d)
 
 
 @router.post("/users", response_model=UserOut, status_code=201, responses=ERR, summary="创建用户")

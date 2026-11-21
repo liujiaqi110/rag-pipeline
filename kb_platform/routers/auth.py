@@ -16,9 +16,10 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 ERR = {401: {"model": ErrorOut}, 422: {"model": ErrorOut}}
 
 
-def me_out(u: User) -> MeOut:
+def me_out(u: User, managed=()) -> MeOut:
     return MeOut(username=u.username, display_name=u.display_name, roles=sorted(r.name for r in u.roles),
-                 departments=sorted(d.name for d in u.departments), clearance=u.clearance, is_admin=u.is_admin)
+                 departments=sorted(d.name for d in u.departments), clearance=u.clearance, is_admin=u.is_admin,
+                 managed_kb_ids=sorted(managed))
 
 
 @router.post("/login", response_model=TokenOut, responses=ERR, summary="用户名密码登录，返回 Bearer Token")
@@ -45,8 +46,13 @@ def logout(request: Request, user: User = Depends(current_user), db: Session = D
 
 
 @router.get("/me", response_model=MeOut, responses=ERR, summary="当前用户身份（只来自 Token）")
-def me(user: User = Depends(current_user)):
-    return me_out(user)
+def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..models import KbManager, KnowledgeBase
+    if user.is_admin:
+        managed = list(db.scalars(select(KnowledgeBase.id)))
+    else:
+        managed = list(db.scalars(select(KbManager.kb_id).where(KbManager.user_id == user.id)))
+    return me_out(user, managed)
 
 
 @router.post("/password", status_code=204, responses=ERR, summary="修改自己的密码（所有 Token 失效）")

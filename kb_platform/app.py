@@ -123,4 +123,30 @@ def create_app(settings: Optional[Settings] = None, backend: Optional[RagBackend
 
     for r in (auth.router, admin.router, knowledge.router, documents.router, chat.router, audit_log.router):
         app.include_router(r)
+    _mount_frontend(app)
     return app
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """Serve the built Vue workbench (frontend/dist) from the same origin, if it has been built. /api/* never falls
+    through to the SPA (unknown API paths stay JSON 404)."""
+    import os
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+    from .settings import PROJECT_ROOT
+    dist = Path(os.environ.get("KB_FRONTEND_DIST", PROJECT_ROOT / "frontend" / "dist")).resolve()
+    index = dist / "index.html"
+    if not index.exists():
+        return
+    if (dist / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str):
+        if full_path.startswith(("api/", "docs", "redoc", "openapi.json")):
+            raise StarletteHTTPException(status_code=404)
+        f = (dist / full_path).resolve()
+        if full_path and dist in f.parents and f.is_file():
+            return FileResponse(f)
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
