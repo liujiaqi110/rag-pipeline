@@ -414,14 +414,17 @@ def retry_job(job_id: str, request: Request, user: User = Depends(manager_user),
 # --- workbench helpers (P4) -----------------------------------------------------------------------------------------
 @router.get("/knowledge-bases/{kb_id}/chunks/{chunk_id}", response_model=CitationDetailOut, responses=ERR,
             tags=["chat"], summary="引用来源：返回 Chunk 原文与位置（仅当前版本、仅可读文档；否则 404）")
-def citation_detail(kb_id: str, chunk_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def citation_detail(kb_id: str, chunk_id: str, version_id: Optional[str] = Query(None, max_length=64),
+                    user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """``version_id`` (P5): the version recorded with the answer's citation. If the document has been updated since,
+    the old text is no longer served and the NEW text is not shown in its place either (404)."""
     from ..acl_store import kb_by_id
     kb = kb_by_id(db, kb_id)
     if kb is None or not isinstance(chunk_id, str) or len(chunk_id) > 32:
         raise not_found()
     readable = {d.id: d for d in readable_documents(db, user, kb)[0]}
     for d in readable.values():
-        if not d.current_version_id:
+        if not d.current_version_id or (version_id and version_id != d.current_version_id):
             continue
         c = db.scalar(select(Chunk).where(Chunk.version_id == d.current_version_id, Chunk.chunk_id == chunk_id))
         if c is not None:

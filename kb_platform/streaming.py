@@ -44,8 +44,12 @@ class DeltaMasker:
             tok = m.group(0)
             if len(tok) == 12 and tok in self.allowed:
                 return tok
+            if len(tok) == 12:
+                # P5 fix: the final validation (rag_pipeline.CITE_RE) blocks EVERY bare 12-hex token, including
+                # all-letter ("abcdefabcdef") and all-digit ones; the stream must never show what the final removes
+                return MASK
             if len(tok) < 6 or not (re.search(r"\d", tok) and re.search(r"[a-fA-F]", tok)):
-                return tok            # plain numbers / words such as "deadbeef"-free text stay
+                return tok            # plain numbers / words stay
             return MASK
         return HEX_RUN.sub(rep, text)
 

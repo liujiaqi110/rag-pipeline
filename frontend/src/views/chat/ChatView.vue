@@ -69,7 +69,7 @@
       </el-form>
       <template #footer><el-button @click="newOpen = false">取消</el-button><el-button type="primary" :disabled="!newKb" @click="create" data-testid="chat-create">创建</el-button></template>
     </el-dialog>
-    <SourceDrawer v-if="detail && source" v-model="sourceOpen" :kb-id="detail.kb_id" :chunk-id="source" />
+    <SourceDrawer v-if="detail && source" v-model="sourceOpen" :kb-id="detail.kb_id" :chunk-id="source" :version-id="sourceVersion" />
   </div>
 </template>
 
@@ -98,7 +98,7 @@ const sessionId = ref<string>('')
 const question = ref('')
 const sending = ref(false)
 const newOpen = ref(false), newKb = ref(''), newTitle = ref('')
-const sourceOpen = ref(false), source = ref('')
+const sourceOpen = ref(false), source = ref(''), sourceVersion = ref<string | null>(null)
 const scroller = ref<{ setScrollTop: (n: number) => void; wrapRef?: HTMLElement }>()
 let abort: AbortController | null = null
 
@@ -168,7 +168,7 @@ async function send() {
   }
 }
 function stop() { abort?.abort() }
-function openSource(c: Citation) { source.value = c.chunk_id; sourceOpen.value = true }
+function openSource(c: Citation) { source.value = c.chunk_id; sourceVersion.value = c.version_id || null; sourceOpen.value = true }
 
 /** Session ended elsewhere (logout / expiry / revocation): wipe visible answers immediately. */
 function onSessionEnded() { abort?.abort(); messages.value = []; detail.value = null }

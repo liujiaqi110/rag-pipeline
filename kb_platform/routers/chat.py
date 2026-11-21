@@ -146,10 +146,24 @@ def _prepare(request: Request, db: Session, user: User, s: ChatSession, question
     return out
 
 
+def pin_citations(db: Session, citations: list) -> list:
+    """P5: record the document version each citation came from. Answers are produced from the active index
+    generation, whose chunks are exactly the current versions, so ``current_version_id`` at answer time is it."""
+    from ..models import Document
+    out = []
+    for c in citations:
+        c = dict(c)
+        if not c.get("version_id"):
+            d = db.scalar(select(Document).where(Document.doc_key == c.get("source")))
+            c["version_id"] = d.current_version_id if d is not None else None
+        out.append(c)
+    return out
+
+
 def _store(db: Session, user: User, s: ChatSession, question: str, user_resp: dict, summary: dict, cached: bool,
            rid: str, fp: dict, hidden: bool = False) -> ChatMessage:
     m = ChatMessage(session_id=s.id, question=question, answer=user_resp.get("answer", ""),
-                    citations=user_resp.get("citations") or [], status=user_resp.get("status") or "",
+                    citations=pin_citations(db, user_resp.get("citations") or []), status=user_resp.get("status") or "",
                     scope_key="revoked" if hidden else summary.get("scope_key", ""))
     db.add(m)
     db.flush()

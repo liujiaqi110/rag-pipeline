@@ -29,7 +29,7 @@ export const kbApi = {
   managers: (id: string) => http.get<string[]>(`/knowledge-bases/${id}/managers`),
   addManager: (id: string, username: string) => http.post<void>(`/knowledge-bases/${id}/managers`, { username }),
   removeManager: (id: string, username: string) => http.del<void>(`/knowledge-bases/${id}/managers/${encodeURIComponent(username)}`),
-  citation: (kbId: string, chunkId: string) => http.get<T.CitationDetail>(`/knowledge-bases/${kbId}/chunks/${chunkId}`),
+  citation: (kbId: string, chunkId: string, versionId?: string | null) => http.get<T.CitationDetail>(`/knowledge-bases/${kbId}/chunks/${chunkId}`, { version_id: versionId || undefined }),
   batchUpload: (kbId: string, files: File[], onProgress: (p: number) => void, onDuplicate = 'reject') => {
     const f = new FormData()
     files.forEach((x) => f.append('files', x, x.name))

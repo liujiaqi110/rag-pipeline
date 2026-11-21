@@ -23,7 +23,7 @@ import { ref, watch } from 'vue'
 import { kbApi } from '@/api/endpoints'
 import type { CitationDetail } from '@/api/types'
 
-const props = defineProps<{ modelValue: boolean; kbId: string; chunkId: string }>()
+const props = defineProps<{ modelValue: boolean; kbId: string; chunkId: string; versionId?: string | null }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
 const detail = ref<CitationDetail | null>(null)
 const loading = ref(false)
@@ -33,8 +33,8 @@ async function load() {
   loading.value = true
   error.value = ''
   detail.value = null
-  try { detail.value = await kbApi.citation(props.kbId, props.chunkId) }
-  catch { error.value = '该来源已不可访问：可能权限已变更、文档已停用或已更新到新版本。' }
+  try { detail.value = await kbApi.citation(props.kbId, props.chunkId, props.versionId) }   // pinned to the answered version
+  catch { error.value = '该来源已不可访问：可能权限已变更、文档已停用，或文档已更新（回答基于旧版本）。' }
   finally { loading.value = false }
 }
 // load whenever it becomes visible (also when it is mounted already open: no @open event then)

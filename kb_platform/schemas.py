@@ -342,6 +342,7 @@ class SessionIn(Req):
 class Citation(BaseModel):
     chunk_id: str
     source: str
+    version_id: Optional[str] = None   # P5: document version the answer was based on (citation lookups are pinned)
 
 
 class MessageOut(BaseModel):

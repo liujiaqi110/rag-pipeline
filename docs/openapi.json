@@ -4023,6 +4023,7 @@
           "chat"
         ],
         "summary": "引用来源：返回 Chunk 原文与位置（仅当前版本、仅可读文档；否则 404）",
+        "description": "``version_id`` (P5): the version recorded with the answer's citation. If the document has been updated since,\nthe old text is no longer served and the NEW text is not shown in its place either (404).",
         "operationId": "citation_detail_api_v1_knowledge_bases__kb_id__chunks__chunk_id__get",
         "security": [
           {
@@ -4046,6 +4047,23 @@
             "schema": {
               "type": "string",
               "title": "Chunk Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
             }
           }
         ],
@@ -5344,6 +5362,17 @@
           "source": {
             "type": "string",
             "title": "Source"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "type": "object",

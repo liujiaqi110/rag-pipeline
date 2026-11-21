@@ -36,7 +36,7 @@ export interface JobOut {
   attempts: number; error_code: string | null; error_message: string | null; result: Record<string, unknown>
   created_at: string; started_at: string | null; finished_at: string | null
 }
-export interface Citation { chunk_id: string; source: string }
+export interface Citation { chunk_id: string; source: string; version_id?: string | null }
 export interface SessionOut { id: string; kb_id: string; title: string; created_at: string }
 export interface MessageOut { id: number; question: string; answer: string; citations: Citation[]; status: string; created_at: string; hidden: boolean }
 export interface SessionDetail extends SessionOut { messages: MessageOut[] }
