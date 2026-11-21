@@ -36,6 +36,21 @@ python -m ragas_eval.example_qa --data build/example_data --out build/example_qa
 | `exists; use --force` | 输出目录已存在；`--force` 只会替换由该脚本创建的目录 |
 | `annotation errors` / `quote not found` | 标注里的原文片段在语料中找不到；修改标注或语料后重新建库 |
 
+## 知识库 ACL（kb_service）
+
+```powershell
+python scripts/build_example_index.py --docs examples/acl_corpus/docs --out build/acl_example_data --dense
+$env:RAG_DATA_DIR="build/acl_example_data"; $env:RAG_ACL_POLICY="examples/acl_corpus/acl_policy.json"
+python -m ragas_eval.kb_service --user eng_alice "发布前需要做哪些检查？" --audit
+```
+
+| 现象 | 处理 |
+|---|---|
+| `PolicyError` | 策略文件缺失或不合法（未知字段、通配符、未知密级）；服务按设计拒绝启动 |
+| `access_denied` | 用户不在目录中、已停用或没有任何授权文档（三种情况返回相同的提示） |
+| `blocked` | 权限闸门拦截（例如问题中伪造了资料块）；不调用模型 |
+| 关闭安全层无效 | 设计如此：kb_service 忽略 `--no-safety` / `RAG_SAFETY_LAYER=off`，见审计中的 `override_attempts_ignored` |
+
 ## 测试
 
 - `python -m unittest discover -s ragas_eval/tests -t .`：软件测试，与 CI 相同。

@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import AbstractSet, Any, Dict, List, Optional
 
 import numpy as np
 
@@ -53,7 +53,10 @@ class Retriever:
             self._cache[text] = self.model.encode([text], normalize_embeddings=True)[0]
         return self._cache[text]
 
-    def dense(self, text: str, scope: Optional[str] = None, k: int = POOL) -> List[Dict[str, Any]]:
+    def dense(self, text: str, scope: Optional[str] = None, k: int = POOL,
+              allowed: Optional[AbstractSet[str]] = None) -> List[Dict[str, Any]]:
+        """``allowed`` (ACL, optional): only these chunk IDs may become candidates. Applied while the pool is being
+        filled, BEFORE the k cut-off, so unauthorised chunks never take a candidate slot. None = no ACL (unchanged)."""
         q = self.encode(text)
         s = self.E @ q
         out = []
@@ -61,6 +64,8 @@ class Retriever:
             if s[i] <= 0:
                 break
             if scope and self.src[i] != scope:
+                continue
+            if allowed is not None and self.ids[i] not in allowed:
                 continue
             out.append({"chunk": {"chunk_id": self.ids[i], "source_file": self.src[i]}, "dense_score": float(s[i])})
             if len(out) >= k:

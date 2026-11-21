@@ -1,0 +1,25 @@
+{
+  "policy_version": "acl-example-2026-11-21.1",
+  "note": "Synthetic users and documents for ACL tests. legal_unlabeled_draft.md intentionally has NO policy (default deny).",
+  "users": {
+    "eng_alice":      {"roles": ["employee"], "departments": ["engineering"], "clearance": 1},
+    "hr_bob":         {"roles": ["employee"], "departments": ["hr"], "clearance": 2},
+    "hr_intern_carol":{"roles": ["intern"], "departments": ["hr"], "clearance": 2},
+    "fin_dave":       {"roles": ["employee"], "departments": ["finance"], "clearance": 2},
+    "auditor_erin":   {"roles": ["employee", "finance_auditor"], "departments": ["audit"], "clearance": 2},
+    "ceo_frank":      {"roles": ["employee", "executive"], "departments": ["management"], "clearance": 3},
+    "former_gina":    {"roles": ["employee"], "departments": ["engineering"], "clearance": 1, "active": false},
+    "contractor_hank":{"roles": ["contractor"], "departments": [], "clearance": 0}
+  },
+  "documents": {
+    "company_handbook.md":   {"classification": "internal", "allow": {"all_authenticated": true}},
+    "eng_deploy_runbook.md": {"classification": "internal", "owner_department": "engineering",
+                              "allow": {"departments": ["engineering"]}},
+    "hr_salary_bands.md":    {"classification": "confidential", "owner_department": "hr",
+                              "allow": {"departments": ["hr"]}, "deny": {"roles": ["intern"]}},
+    "finance_budget_plan.md":{"classification": "confidential", "owner_department": "finance",
+                              "allow": {"departments": ["finance"], "roles": ["finance_auditor"]}},
+    "exec_strategy_memo.md": {"classification": "restricted", "owner_department": "management",
+                              "allow": {"roles": ["executive"]}}
+  }
+}

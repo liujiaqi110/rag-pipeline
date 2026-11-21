@@ -14,3 +14,9 @@
   两者只为复现而保留。
 - `config/rag_config.yaml` 的大部分字段不被代码读取（见 `docs/CONFIG.md`）；`scripts/03` 的 `load_config()` 从未被调用。
 - 公开示例知识库规模很小，检索指标接近饱和，只能验证功能，不能比较策略优劣。
+- 知识库 ACL（第一阶段，见 `docs/KNOWLEDGE_PLATFORM.md`）：
+  - BM25 的 IDF 使用全库统计，未授权文档的词频可能轻微影响授权 Chunk 的排序；
+  - 策略粒度是文档，没有 Chunk 级策略和部门层级继承；
+  - 用户目录是 JSON 文件，没有身份认证，调用方需要自行完成认证；
+  - `kb_service` 的请求串行执行；
+  - 旧的 `rag_service` 和 `retrieval_eval` 没有 ACL，不能作为平台入口使用。

@@ -121,6 +121,10 @@ $env:RAG_DATA_DIR="D:\my_rag_data"
 
 安全层**不保证**引用在语义上支持对应陈述。
 
+## 7a. 企业知识库 ACL（开发中，分支 feature/knowledge-platform-acl）
+
+平台入口 `python -m ragas_eval.kb_service --user <user_id> "问题"`（需要 `RAG_ACL_POLICY` 指向策略文件）。规则：默认拒绝、拒绝优先、密级与授权同时满足；BM25 / Dense / RRF 在**候选阶段**只考虑授权 Chunk；安全层强制开启；Prompt 与输出两道闸门；未授权 Chunk ID 在全部输出中脱敏。原有的 `rag_service` 是单租户服务，没有 ACL，行为不变。设计、验收与后续阶段见 [docs/KNOWLEDGE_PLATFORM.md](docs/KNOWLEDGE_PLATFORM.md)。
+
 ## 8. 测试与 CI
 
 ```powershell
