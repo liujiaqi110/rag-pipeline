@@ -129,6 +129,8 @@ $env:RAG_DATA_DIR="D:\my_rag_data"
 
 第三阶段增加文档上传与自动索引：支持 Markdown / TXT / PDF / DOCX 单文件与批量上传，复用原有切片脚本（03/04/05）和 BM25 / bge-m3 Dense 索引，支持版本更新、停用、删除和索引故障恢复；新文档默认无人可读。
 
+第四阶段增加浏览器工作台 `frontend/`（Vue 3 + TypeScript + Element Plus），包括登录、知识管理、权限管理、SSE 流式问答和平台管理页面；后端引入 Alembic 迁移、可撤销 JWT 和后台任务。运行方法见 [docs/RUNBOOK.md](docs/RUNBOOK.md)，设计与测试结果见 [docs/KNOWLEDGE_PLATFORM.md](docs/KNOWLEDGE_PLATFORM.md)。
+
 ## 8. 测试与 CI
 
 ```powershell

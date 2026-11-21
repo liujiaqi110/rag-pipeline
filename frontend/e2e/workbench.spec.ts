@@ -72,6 +72,7 @@ test('星河制造：管理员建库导入授权，员工流式问答，撤权/�
     await admin.keyboard.press('Escape')
     await admin.reload()
     for (const f of FILES) await expect(admin.getByTestId(`vstatus-${f}`)).toHaveText('已索引')
+    await admin.screenshot({ path: 'test-results/shots/knowledge.png', animations: 'disabled' })
     await expect(admin.getByTestId('index-badge')).toContainText('索引')
     // PDF chunks carry page numbers; the admin MANAGES but cannot READ (no grant yet)
     await admin.getByTestId('chunks-Quality_Audit_Report.pdf').click()
@@ -110,6 +111,7 @@ test('星河制造：管理员建库导入授权，员工流式问答，撤权/�
       await admin.getByTestId(`acl-${file}`).click()
       await expect(admin.locator('.el-dialog:visible')).toContainText('默认拒绝')
       await fn()
+      if (file.endsWith('.md')) await admin.screenshot({ path: 'test-results/shots/acl.png', animations: 'disabled' })
       await admin.getByTestId('acl-save').click()
       await expect(admin.locator('.el-message--success').last()).toBeVisible()
     }
@@ -131,8 +133,10 @@ test('星河制造：管理员建库导入授权，员工流式问答，撤权/�
     const cards = firstTurn.getByTestId('citation-card')
     await expect(cards.first()).toBeVisible()
     await expect(cards.filter({ hasText: '研发发布规范.md' })).toHaveCount(1)
+    await user.screenshot({ path: 'test-results/shots/chat.png', animations: 'disabled' })
     await cards.filter({ hasText: '研发发布规范.md' }).click()
     await expect(user.getByTestId('source-text')).toContainText('XH-RND-7731')
+    await user.screenshot({ path: 'test-results/shots/source.png', animations: 'disabled' })
     await user.keyboard.press('Escape')
   })
 
@@ -189,6 +193,10 @@ test('星河制造：管理员建库导入授权，员工流式问答，撤权/�
   })
 
   await test.step('12 退出登录后无法继续访问受保护接口', async () => {
+    await admin.goto('/admin/system')
+    await expect(admin.getByTestId('stat-model')).toContainText('qwen2.5')
+    await admin.waitForTimeout(1500)   // let the ECharts entry animation finish before the screenshot
+    await admin.screenshot({ path: 'test-results/shots/system.png', animations: 'disabled' })
     const tok = await token(user)
     expect(tok?.split('.').length).toBe(3)                               // JWT
     await user.getByTestId('user-menu').click()

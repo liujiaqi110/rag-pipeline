@@ -86,9 +86,31 @@ $env:HF_HOME="<本机 HuggingFace 缓存目录>"; $env:HF_HUB_OFFLINE="1"; $env:
 | 问答 503 `dense_unavailable` | 当前索引没有 Dense（本机缺少 bge-m3 或 sentence-transformers）；安装后重建，或显式设置 `KB_RETRIEVAL_MODE=bm25` |
 | 上传后用户仍检索不到 | 新文档默认没有读取授权，需要 `PUT /api/v1/documents/{id}/acl` |
 
+### 浏览器工作台（第四阶段）
+
+```powershell
+cd frontend
+pnpm install
+pnpm exec vite build                    # 产物 frontend/dist，由 FastAPI 在 / 下提供
+cd ..
+.venv\Scripts\python -m kb_platform.cli db-upgrade    # 原地升级数据库（保留数据）
+.venv\Scripts\python -m uvicorn kb_platform.app:create_app --factory --port 8000
+```
+
+打开 `http://127.0.0.1:8000/` 使用工作台。开发模式：`cd frontend; pnpm dev`（5173 端口，/api 代理到 8000）。
+
+| 现象 | 处理 |
+|---|---|
+| 上传后一直显示“处理中” | 查看 `GET /api/v1/jobs?status=running`；服务重启后被中断的任务会标记为 `interrupted`，在版本抽屉或任务接口中点“重试” |
+| 问答显示“权限或登录状态已变更” | 生成过程中权限被修改或已登出，这次回答已停止并隐藏（设计如此） |
+| 所有用户都被要求重新登录 | `KB_JWT_SECRET` 或 `KB_STORAGE_DIR/secrets/jwt_hs256.key` 发生了变化（旧 JWT 全部失效） |
+| 升级后数据库报错 | `python -m kb_platform.cli db-current` 查看当前版本；迁移不会删除数据，失败时整个迁移回滚 |
+
 ## 测试
 
 - `python -m unittest discover -s ragas_eval/tests -t .`：软件测试，与 CI 相同。
 - `.venv\Scripts\python -m unittest discover -s kb_platform/tests -t .`：知识库后端 API 测试（CI 中同样运行）。
 - `.venv\Scripts\python -m unittest tests_local.test_kb_platform_real -v`：第三阶段真实集成（bge-m3 + Ollama，需要设置 HF_HOME）。
+- `cd frontend; pnpm exec vitest run`：前端单元与组件测试（CI 中运行）。
+- `cd frontend; $env:HF_HOME="<本机 HuggingFace 缓存目录>"; pnpm exec playwright test`：浏览器端到端测试（Microsoft Edge + 真实后端 + bge-m3 + Ollama，仅在本地运行）。
 - `python -m unittest discover -s tests_local -t .`：本地重型集成测试，需要 bge-m3 和 Ollama，不在 CI 中运行。

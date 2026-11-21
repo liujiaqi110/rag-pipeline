@@ -62,8 +62,10 @@ class TestRealDenseIngestion(unittest.TestCase):
         from kb_platform.rag_backend import AnswerCache, RagBackend
         from kb_platform.settings import Settings
         cls.tmp = Path(tempfile.mkdtemp(prefix="kb_real_"))
+        # inline jobs: the P3 synchronous contract on the same job code path (the async 202 path with the real
+        # models is covered by the browser end-to-end suite, frontend/e2e)
         st = Settings(database_url="sqlite://", storage_dir=str(cls.tmp / "storage"), dense_mode="required",
-                      retrieval_mode="rrf")
+                      retrieval_mode="rrf", jobs_mode="inline")
         cls.index = IndexManager(st)                       # default embedder: the real bge-m3
         cls.llm = RecordingOllama() if HAVE_OLLAMA else None
         backend = RagBackend(index=cls.index, llm_factory=(lambda: cls.llm) if cls.llm else None,
