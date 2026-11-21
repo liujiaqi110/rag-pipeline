@@ -7,7 +7,13 @@ __pycache__/
 data/
 *.pkl
 *.log
+# Private research outputs: the root experiments/ and any nested experiments/ dir stay ignored.
+/experiments/
 experiments/
+# Exception: public aggregate reports (Markdown only) under docs/experiments/.
+!/docs/experiments/
+/docs/experiments/**
+!/docs/experiments/*.md
 chunks/
 index/
 raw_docs/
