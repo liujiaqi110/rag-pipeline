@@ -44,7 +44,7 @@ def current_user(request: Request, cred: HTTPAuthorizationCredentials | None = D
                  db: Session = Depends(get_db)) -> User:
     if cred is None or (cred.scheme or "").lower() != "bearer":
         raise ApiError(401, "unauthenticated", "需要登录", {"WWW-Authenticate": "Bearer"})
-    res = security.resolve_token(db, cred.credentials)
+    res = security.resolve_token(db, cred.credentials, request.app.state.jwt)
     if res is None:
         raise ApiError(401, "unauthenticated", "登录已失效，请重新登录", {"WWW-Authenticate": "Bearer"})
     user, tok = res

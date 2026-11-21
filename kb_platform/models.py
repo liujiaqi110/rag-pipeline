@@ -41,6 +41,8 @@ class Department(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="")
+    # P4: organisation tree for management/UI only. ACL does NOT inherit along the tree (no implicit grants).
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("departments.id", ondelete="SET NULL", name="fk_departments_parent_id"), nullable=True)
 
 
 class User(Base):
@@ -64,6 +66,8 @@ class AuthToken(Base):
     __tablename__ = "auth_tokens"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     token_sha256: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)  # never the raw token
+    # P4: "opaque" (sha256 of the random token) or "jwt" (sha256 of the JWT's jti) — both revocable server-side
+    kind: Mapped[str] = mapped_column(String(8), default="opaque", server_default="opaque")
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -221,3 +225,26 @@ class IndexGeneration(Base):
     dense_error: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     built_by: Mapped[str] = mapped_column(String(64), default="")
+
+
+class Job(Base):
+    """P4 background job (document processing / index build). status: queued → running → succeeded | failed |
+    cancelled. ``cancel_requested`` is honoured between stages; a cancelled job never activates an index."""
+    __tablename__ = "jobs"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)          # ingest | index_rebuild
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    stage: Mapped[str] = mapped_column(String(32), default="queued")
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    kb_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    document_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    version_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

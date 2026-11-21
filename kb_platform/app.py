@@ -57,7 +57,11 @@ def create_app(settings: Optional[Settings] = None, backend: Optional[RagBackend
     app = FastAPI(title="企业知识库平台 API", version=__version__, openapi_tags=TAGS,
                   description="带 ACL 的企业知识库后端：认证、身份与权限持久化、知识库/文档元数据、"
                               "ACL 约束的 RAG 问答（候选阶段过滤 + 强制引用安全层）、会话隔离与审计。")
+    if settings.token_format not in ("jwt", "opaque"):
+        raise RuntimeError("KB_TOKEN_FORMAT must be jwt or opaque")
     app.state.settings = settings
+    from .security import load_jwt_config
+    app.state.jwt = load_jwt_config(settings)  # always loaded: JWTs stay verifiable even if login issues opaque
     app.state.engine = engine
     app.state.sessionmaker = make_sessionmaker(engine)
     if backend is None:

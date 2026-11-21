@@ -5315,6 +5315,15 @@
             "type": "string",
             "format": "date-time",
             "title": "Expires At"
+          },
+          "token_format": {
+            "type": "string",
+            "enum": [
+              "jwt",
+              "opaque"
+            ],
+            "title": "Token Format",
+            "default": "opaque"
           }
         },
         "type": "object",

@@ -31,6 +31,7 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_at: datetime
+    token_format: Literal["jwt", "opaque"] = "opaque"
 
 
 class MeOut(BaseModel):

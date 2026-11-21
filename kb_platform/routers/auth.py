@@ -31,9 +31,9 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
         actor = body.username if exists else "<unknown>"
         audit(db, action="auth.login", outcome="failure", actor=actor, request_id=request_id(request))
         raise ApiError(401, "invalid_credentials", "用户名或密码错误")  # same for unknown / wrong / inactive / locked
-    raw, exp = security.issue_token(db, user, st.token_ttl_minutes)
+    raw, exp = security.issue_token(db, user, st.token_ttl_minutes, st.token_format, request.app.state.jwt)
     audit(db, action="auth.login", outcome="success", actor=user.username, request_id=request_id(request))
-    return TokenOut(access_token=raw, expires_at=exp)
+    return TokenOut(access_token=raw, expires_at=exp, token_format=st.token_format)
 
 
 @router.post("/logout", status_code=204, responses=ERR, summary="注销当前 Token")

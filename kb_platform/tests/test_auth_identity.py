@@ -53,7 +53,7 @@ class TestLogin(ApiCase):
     def test_expired_token(self):
         h = self.h("fin_dave", fresh=True)
         with self.factory() as db:
-            tok = db.scalar(select(AuthToken).where(AuthToken.token_sha256 == security.token_digest(h["Authorization"][7:])))
+            tok = db.scalar(select(AuthToken).where(AuthToken.token_sha256 == self.stored_digest(h["Authorization"][7:])))
             tok.expires_at = utcnow() - timedelta(seconds=1)
             db.commit()
         self.assertEqual(self.client.get("/api/v1/auth/me", headers=h).status_code, 401)
@@ -91,7 +91,7 @@ class TestLogin(ApiCase):
             dump = " ".join(str(v) for row in db.execute(text("SELECT * FROM auth_tokens")) for v in row)
             dump += " ".join(str(v) for row in db.execute(text("SELECT * FROM users")) for v in row)
         self.assertNotIn(raw, dump)
-        self.assertIn(security.token_digest(raw), dump)
+        self.assertIn(self.stored_digest(raw), dump)
         self.assertNotIn(self.creds["eng_alice"], dump)
         self.assertIn("scrypt$", dump)
 

@@ -35,3 +35,12 @@ class Settings:
     embedding_model: str = field(default_factory=lambda: os.environ.get("KB_EMBEDDING_MODEL", "BAAI/bge-m3"))
     # rrf = formal service fusion (needs Dense); bm25 = explicit BM25-only answering (never a silent fallback)
     retrieval_mode: str = field(default_factory=lambda: os.environ.get("KB_RETRIEVAL_MODE", "rrf"))
+    # --- P4 auth / jobs ---
+    # jwt = HS256 JWT whose jti is stored (hashed) server-side -> revocable like opaque tokens; opaque = P2 tokens.
+    # Both kinds are always ACCEPTED (existing sessions survive the switch); this only selects what login issues.
+    token_format: str = field(default_factory=lambda: os.environ.get("KB_TOKEN_FORMAT", "jwt"))
+    jwt_secret: str = field(default_factory=lambda: os.environ.get("KB_JWT_SECRET", ""))  # empty -> key file in storage
+    jwt_issuer: str = "kb_platform"
+    jwt_audience: str = "kb_platform_api"
+    # background jobs: thread = worker thread (production); inline = run right after enqueue (tests / tiny setups)
+    jobs_mode: str = field(default_factory=lambda: os.environ.get("KB_JOBS_MODE", "thread"))

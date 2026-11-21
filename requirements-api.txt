@@ -5,6 +5,8 @@ sqlalchemy>=2.0,<2.1
 httpx==0.28.1        # FastAPI TestClient (API tests)
 uvicorn==0.52.0      # local server
 pyyaml==6.0.3
+alembic>=1.13,<2          # database migrations (P4)
+PyJWT>=2.8,<3             # revocable JWT access tokens (P4)
 python-multipart==0.0.32   # file uploads (P3)
 numpy>=2,<3                # index generations / Dense
 pypdf>=5,<7                # PDF parsing (P3)

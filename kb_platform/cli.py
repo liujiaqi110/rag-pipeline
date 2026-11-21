@@ -1,6 +1,7 @@
 """Operator CLI (the only way to create a platform admin — there is no API for privilege escalation).
 
-    python -m kb_platform.cli init-db
+    python -m kb_platform.cli init-db                 # = db-upgrade (Alembic; existing data is kept)
+    python -m kb_platform.cli db-upgrade | db-current
     python -m kb_platform.cli create-admin --username admin          # password read from env KB_ADMIN_PASSWORD
     python -m kb_platform.cli seed-example --credentials-out build/kb_example_credentials.json
     python -m kb_platform.cli export-openapi --out docs/openapi.json
@@ -99,6 +100,8 @@ def main(argv=None) -> int:
     a.add_argument("--username", required=True)
     s = sub.add_parser("seed-example")
     s.add_argument("--credentials-out", default=str(ROOT / "build" / "kb_example_credentials.json"))
+    sub.add_parser("db-upgrade", help="apply Alembic migrations (existing data is kept)")
+    sub.add_parser("db-current", help="print the current migration revision")
     o = sub.add_parser("export-openapi")
     o.add_argument("--out", default=str(ROOT / "docs" / "openapi.json"))
     args = ap.parse_args(argv)
@@ -107,6 +110,13 @@ def main(argv=None) -> int:
         spec = create_app(Settings(database_url="sqlite://")).openapi()
         Path(args.out).write_text(json.dumps(spec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {args.out}")
+        return 0
+    if args.cmd in ("db-upgrade", "db-current"):
+        from . import migrate
+        st = Settings()
+        eng = make_engine(st.database_url)
+        rev = migrate.upgrade(eng) if args.cmd == "db-upgrade" else migrate.current(eng)
+        print(f"revision {rev} (head {migrate.head()})")
         return 0
     factory = _factory()
     if args.cmd == "init-db":

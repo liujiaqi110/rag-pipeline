@@ -109,6 +109,13 @@ class ApiCase(unittest.TestCase):
         sid = sid or self.new_session(user)
         return self.client.post(f"/api/v1/sessions/{sid}/ask", json={"question": question}, headers=self.h(user), **kw)
 
+    def stored_digest(self, raw: str) -> str:
+        """What auth_tokens.token_sha256 holds for this token: sha256(token) for opaque, sha256(jti) for JWT."""
+        from kb_platform.security import decode_jwt, token_digest
+        if raw.count(".") == 2:
+            return token_digest(decode_jwt(raw, self.app.state.jwt)["jti"])
+        return token_digest(raw)
+
     def doc_ids(self):
         r = self.client.get(f"/api/v1/knowledge-bases/{self.kb_id}/documents", headers=self.h(ADMIN))
         return {d["doc_key"]: d["id"] for d in r.json()}

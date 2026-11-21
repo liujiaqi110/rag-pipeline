@@ -40,8 +40,9 @@ def make_sessionmaker(engine: Engine) -> sessionmaker:
 
 
 def init_db(engine: Engine) -> None:
-    from . import models  # noqa: F401  (register tables)
-    Base.metadata.create_all(engine)
+    """P4: schema is managed by Alembic (kb_platform.migrate) — existing databases are upgraded, never recreated."""
+    from . import migrate
+    migrate.upgrade(engine)
 
 
 def session_scope(factory: sessionmaker) -> Iterator[Session]:
