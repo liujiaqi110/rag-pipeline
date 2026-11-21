@@ -178,7 +178,8 @@ class VersionOut(Out):
 
 
 class IndexInfo(BaseModel):
-    status: Literal["active", "failed", "skipped"]
+    status: Literal["active", "failed", "skipped", "pending"]
+    job_id: Optional[str] = None
     generation_id: Optional[str] = None
     dense: Optional[bool] = None
     dense_error: Optional[str] = None
@@ -191,6 +192,8 @@ class UploadOut(BaseModel):
     document: DocumentOut
     version: Optional[VersionOut] = None
     index: IndexInfo
+    process_job_id: Optional[str] = None
+    index_job_id: Optional[str] = None
 
 
 class BatchItem(BaseModel):
@@ -202,6 +205,7 @@ class BatchItem(BaseModel):
     status: Optional[str] = None
     error_code: Optional[str] = None
     message: Optional[str] = None
+    job_id: Optional[str] = None
 
 
 class BatchOut(BaseModel):
@@ -241,6 +245,26 @@ class ChunkListOut(BaseModel):
     total: int
     text_visible: bool
     chunks: List[ChunkOut]
+
+
+class JobOut(Out):
+    id: str
+    kind: str
+    status: str
+    stage: str
+    progress: int
+    kb_id: Optional[str] = None
+    document_id: Optional[str] = None
+    version_id: Optional[str] = None
+    created_by: str
+    cancel_requested: bool
+    attempts: int
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    result: dict
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 
 class GenerationOut(Out):

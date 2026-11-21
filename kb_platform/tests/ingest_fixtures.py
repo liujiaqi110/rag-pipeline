@@ -120,6 +120,11 @@ class IngestCase(ApiCase):
     """ApiCase (P2 seeded users) + platform-managed index in a temp storage dir + FakeEmbedder."""
 
     dense_mode = "auto"
+    jobs_mode = "inline"          # P3 tests: jobs run synchronously through the job runner (same code path)
+
+    @classmethod
+    def database_url(cls):
+        return "sqlite://"
     retrieval_mode = "rrf"
     embedder_available = True
 
@@ -134,8 +139,9 @@ class IngestCase(ApiCase):
             if not cls.embedder_available_now:
                 raise EmbeddingUnavailable()
             return cls.embedder
-        cls.settings_obj = Settings(database_url="sqlite://", storage_dir=str(cls.storage), dense_mode=cls.dense_mode,
-                                    retrieval_mode=cls.retrieval_mode, max_upload_bytes=512 * 1024, max_batch_files=8)
+        cls.settings_obj = Settings(database_url=cls.database_url(), storage_dir=str(cls.storage), dense_mode=cls.dense_mode,
+                                    retrieval_mode=cls.retrieval_mode, max_upload_bytes=512 * 1024, max_batch_files=8,
+                                    jobs_mode=cls.jobs_mode)
         cls.index = IndexManager(cls.settings_obj, embedder_factory=factory)
         cls.llm = RecordingLLM()
         backend = RagBackend(index=cls.index, llm_factory=lambda: cls.llm, mode=cls.retrieval_mode,

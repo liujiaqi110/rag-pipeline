@@ -27,10 +27,15 @@ def make_engine(url: str) -> Engine:
             kw["poolclass"] = StaticPool
     engine = create_engine(url, future=True, **kw)
     if url.startswith("sqlite"):
+        file_db = url.startswith("sqlite:///") and url != "sqlite:///:memory:"
+
         @event.listens_for(engine, "connect")
         def _fk_on(dbapi_conn, _):  # enforce foreign keys on SQLite (PostgreSQL always does)
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA foreign_keys=ON")
+            cur.execute("PRAGMA busy_timeout=10000")      # request threads + job worker share the file
+            if file_db:
+                cur.execute("PRAGMA journal_mode=WAL")    # readers do not block the writer (and vice versa)
             cur.close()
     return engine
 

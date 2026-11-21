@@ -29,6 +29,7 @@ from .deps import ApiError
 from .rag_backend import AnswerCache, RagBackend
 from .routers import admin, audit_log, auth, chat, documents, knowledge
 from .settings import Settings
+from contextlib import asynccontextmanager
 
 log = logging.getLogger("kb_platform")
 RID = re.compile(r"^[A-Za-z0-9-]{1,32}$")
@@ -38,6 +39,7 @@ TAGS = [
     {"name": "knowledge", "description": "知识库、文档元数据、文档 ACL、知识库管理者"},
     {"name": "documents", "description": "文档上传、批量上传、版本、处理状态、Chunk、停用/启用/删除"},
     {"name": "index", "description": "索引代际状态与重建（平台管理员）"},
+    {"name": "jobs", "description": "后台任务：进度查询、取消、重试"},
     {"name": "chat", "description": "会话与带 ACL 的知识库问答"},
     {"name": "audit", "description": "审计日志（平台管理员）"},
 ]
@@ -54,7 +56,12 @@ def create_app(settings: Optional[Settings] = None, backend: Optional[RagBackend
     install_log_filter()
     engine = make_engine(settings.database_url)
     init_db(engine)
-    app = FastAPI(title="企业知识库平台 API", version=__version__, openapi_tags=TAGS,
+    @asynccontextmanager
+    async def lifespan(app_):
+        yield
+        app_.state.jobs.stop()
+
+    app = FastAPI(title="企业知识库平台 API", version=__version__, openapi_tags=TAGS, lifespan=lifespan,
                   description="带 ACL 的企业知识库后端：认证、身份与权限持久化、知识库/文档元数据、"
                               "ACL 约束的 RAG 问答（候选阶段过滤 + 强制引用安全层）、会话隔离与审计。")
     if settings.token_format not in ("jwt", "opaque"):
@@ -69,6 +76,11 @@ def create_app(settings: Optional[Settings] = None, backend: Optional[RagBackend
         backend = RagBackend(index=IndexManager(settings), mode=settings.retrieval_mode,
                              cache=AnswerCache(settings.answer_cache_size, settings.answer_cache_ttl_s))
     app.state.backend = backend
+    if settings.jobs_mode not in ("thread", "inline"):
+        raise RuntimeError("KB_JOBS_MODE must be thread or inline")
+    from .jobs import JobRunner
+    app.state.jobs = JobRunner(app.state.sessionmaker, backend, settings)
+    app.state.jobs.recover()
 
     @app.middleware("http")
     async def request_id_mw(request: Request, call_next):

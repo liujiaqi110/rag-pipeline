@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -21,9 +21,10 @@ from ..audit import audit
 from ..deps import ApiError, admin_user, current_user, get_db, manager_user, not_found, request_id
 from ..ingest.errors import IngestError
 from ..ingest.manager import INDEXABLE, Ingestor, safe_filename
-from ..models import Chunk, Document, DocumentVersion, IndexGeneration, User
+from ..models import Chunk, Document, DocumentVersion, IndexGeneration, Job, User
 from ..schemas import (NAME, BatchItem, BatchOut, ChunkListOut, ChunkOut, Classification, DocumentOut,
-                       DocumentStatusOut, ErrorOut, GenerationOut, IndexInfo, IndexStatusOut, UploadOut, VersionOut)
+                       DocumentStatusOut, ErrorOut, GenerationOut, IndexInfo, IndexStatusOut, JobOut, UploadOut,
+                       VersionOut)
 from .knowledge import managed_doc, managed_kb, visible_doc
 
 router = APIRouter(prefix="/api/v1", tags=["documents"])
@@ -39,21 +40,26 @@ def _platform(request: Request):
     return backend.index
 
 
-def reindex(request: Request, db: Session, actor: str) -> IndexInfo:
-    """Build + activate a new generation. Failure keeps the old one and is reported, never raised to the client."""
-    idx = _platform(request)
-    try:
-        g = idx.build(db, actor)
-        request.app.state.backend.cache.clear()
-        audit(db, action="index.build", outcome="success", actor=actor, resource=g.id, request_id=request_id(request),
-              detail={"chunks": g.chunk_count, "dense": g.dense, "error_code": g.dense_error})
-        return IndexInfo(status="active", generation_id=g.id, dense=g.dense, dense_error=g.dense_error)
-    except IngestError as e:
-        audit(db, action="index.build", outcome="failure", actor=actor, request_id=request_id(request),
-              detail={"error_code": e.code})
-        active = idx.active_generation(db)
-        return IndexInfo(status="failed", error_code=e.code, message=e.message,
-                         generation_id=active.id if active else None, dense=active.dense if active else None)
+def index_info(job: Job) -> IndexInfo:
+    """IndexInfo for an index job: pending while it runs (thread mode), the outcome once it is finished."""
+    if job.status in ("queued", "running"):
+        return IndexInfo(status="pending", job_id=job.id)
+    r = job.result or {}
+    if job.status == "succeeded":
+        return IndexInfo(status="active", job_id=job.id, generation_id=r.get("generation_id"), dense=r.get("dense"),
+                         dense_error=r.get("dense_error"))
+    return IndexInfo(status="failed", job_id=job.id, error_code=job.error_code, message=job.error_message,
+                     generation_id=r.get("generation_id"), dense=r.get("dense"))
+
+
+def reindex(request: Request, db: Session, actor: str, kb_id: Optional[str] = None) -> IndexInfo:
+    """Queue an index build (P4: background job). Failure keeps the old generation; never raised to the client."""
+    _platform(request)
+    job = request.app.state.jobs.enqueue(db, "index", actor, kb_id=kb_id)
+    info = index_info(job)
+    audit(db, action="index.build", outcome=info.status, actor=actor, resource=job.id, request_id=request_id(request),
+          detail={"error_code": info.error_code, "generation": info.generation_id})
+    return info
 
 
 async def _read(upload: UploadFile, limit: int) -> bytes:
@@ -65,7 +71,8 @@ async def _read(upload: UploadFile, limit: int) -> bytes:
 
 def _ingest_one(request: Request, db: Session, kb, user: User, filename: str, data: bytes, title: str,
                 classification: str, owner_department: Optional[str], on_duplicate: str, target: Optional[Document] = None):
-    """Returns (outcome, document, version). Raises IngestError for rejections (nothing is written then)."""
+    """Returns (outcome, document, version, process_job). Raises IngestError for rejections (nothing written then).
+    Parsing / chunking runs as a background ``process`` job (inline mode: already finished on return)."""
     idx = _platform(request)
     ing = Ingestor(request.app.state.settings, idx)
     from ..ingest import parsers
@@ -78,29 +85,28 @@ def _ingest_one(request: Request, db: Session, kb, user: User, filename: str, da
             if on_duplicate == "reject":
                 raise IngestError("duplicate_name", "同名文档已存在；如需更新请上传新版本（on_duplicate=new_version）", 409)
             if on_duplicate == "skip":
-                return "skipped", same, None
+                return "skipped", same, None, None
             target = same
         else:
             dup = ing.find_same_content(db, kb, sha)
             if dup is not None:
                 if on_duplicate == "skip":
-                    return "skipped", dup, None
+                    return "skipped", dup, None, None
                 raise IngestError("duplicate_content", "相同内容的文档已存在", 409)
     if target is not None:
         cur = db.get(DocumentVersion, target.current_version_id) if target.current_version_id else None
         latest = db.scalars(select(DocumentVersion).where(DocumentVersion.document_id == target.id)
                             .order_by(DocumentVersion.version_no.desc()).limit(1)).first()
         if (cur and cur.sha256 == sha) or (latest and latest.sha256 == sha and latest.status in ("chunked", "indexed")):
-            return "unchanged", target, latest
-        v = ing.add_version(db, target, filename, data, user.username)
-        ing.process(db, target, v)
-        db.commit()
-        return "new_version", target, v
-    d = ing.new_document(db, kb, filename, title, classification, owner_department)
+            return "unchanged", target, latest, None
+        d, outcome = target, "new_version"
+    else:
+        d, outcome = ing.new_document(db, kb, filename, title, classification, owner_department), "created"
     v = ing.add_version(db, d, filename, data, user.username)
-    ing.process(db, d, v)
     db.commit()
-    return "created", d, v
+    job = request.app.state.jobs.enqueue(db, "process", user.username, kb_id=kb.id, document_id=d.id, version_id=v.id)
+    db.expire_all()
+    return outcome, db.get(Document, d.id), db.get(DocumentVersion, v.id), job
 
 
 def _ingest_error(e: IngestError) -> ApiError:
@@ -108,8 +114,10 @@ def _ingest_error(e: IngestError) -> ApiError:
 
 
 @router.post("/knowledge-bases/{kb_id}/documents/upload", response_model=UploadOut, status_code=201, responses=ERR,
-             summary="上传单个文档（.md/.txt/.pdf/.docx），自动解析、切片、建索引。新文档默认无人可读")
-async def upload(kb_id: str, request: Request, file: UploadFile = File(...), title: str = Form("", max_length=255),
+             summary="上传单个文档（.md/.txt/.pdf/.docx）。解析、切片、建索引在后台任务中进行：返回 202 + 任务 ID"
+                     "（KB_JOBS_MODE=inline 时同步完成，返回 201）。新文档默认无人可读")
+async def upload(kb_id: str, request: Request, response: Response, file: UploadFile = File(...),
+                 title: str = Form("", max_length=255),
                  classification: Classification = Form("internal"),
                  owner_department: Optional[str] = Form(None, pattern=NAME),
                  on_duplicate: OnDuplicate = Query("reject"), build_index: bool = Query(True),
@@ -118,23 +126,31 @@ async def upload(kb_id: str, request: Request, file: UploadFile = File(...), tit
     name = safe_filename(file.filename or "")
     try:
         data = await _read(file, request.app.state.settings.max_upload_bytes)
-        outcome, d, v = _ingest_one(request, db, kb, user, name, data, title, classification, owner_department, on_duplicate)
+        outcome, d, v, pjob = _ingest_one(request, db, kb, user, name, data, title, classification, owner_department,
+                                          on_duplicate)
     except IngestError as e:
         db.rollback()
         audit(db, action="document.upload", outcome="rejected", actor=user.username, resource=kb.id,
               request_id=request_id(request), detail={"error_code": e.code})
         raise _ingest_error(e)
+    return _finish_upload(request, response, db, user, kb.id, outcome, d, v, pjob, build_index, "document.upload")
+
+
+def _finish_upload(request, response, db, user, kb_id, outcome, d, v, pjob, build_index, action) -> UploadOut:
     info = IndexInfo(status="skipped")
-    if build_index and v is not None and v.status == "chunked":
-        info = reindex(request, db, user.username)
-    db.refresh(d)
-    if v is not None:
-        db.refresh(v)
-    audit(db, action="document.upload", outcome=outcome, actor=user.username, resource=d.id, request_id=request_id(request),
-          detail={"kb_id": kb.id, "version_no": v.version_no if v else None, "status": v.status if v else None,
+    if build_index and pjob is not None and (pjob.status not in ("failed", "cancelled")):
+        info = reindex(request, db, user.username, kb_id)
+    db.expire_all()
+    d = db.get(Document, d.id)
+    v = db.get(DocumentVersion, v.id) if v is not None else None
+    pending = (pjob is not None and pjob.status in ("queued", "running")) or info.status == "pending"
+    response.status_code = 202 if pending else 201
+    audit(db, action=action, outcome=outcome, actor=user.username, resource=d.id, request_id=request_id(request),
+          detail={"kb_id": kb_id, "version_no": v.version_no if v else None, "status": v.status if v else None,
                   "error_code": v.error_code if v else None})
     return UploadOut(outcome=outcome, document=DocumentOut.model_validate(d),
-                     version=VersionOut.model_validate(v) if v else None, index=info)
+                     version=VersionOut.model_validate(v) if v else None, index=info,
+                     process_job_id=pjob.id if pjob else None, index_job_id=info.job_id)
 
 
 @router.post("/knowledge-bases/{kb_id}/documents/batch-upload", response_model=BatchOut, responses=ERR,
@@ -152,19 +168,23 @@ async def batch_upload(kb_id: str, request: Request, files: List[UploadFile] = F
         name = safe_filename(f.filename or "")
         try:
             data = await _read(f, st.max_upload_bytes)
-            outcome, d, v = _ingest_one(request, db, kb, user, name, data, "", classification, None, on_duplicate)
+            outcome, d, v, pjob = _ingest_one(request, db, kb, user, name, data, "", classification, None, on_duplicate)
             ok = v is None or v.status != "failed"
-            any_chunked |= bool(v is not None and v.status == "chunked")
+            any_chunked |= pjob is not None and pjob.status not in ("failed", "cancelled")
             results.append(BatchItem(filename=name, ok=ok, outcome=outcome, document_id=d.id, version_id=v.id if v else None,
                                      status=v.status if v else None, error_code=v.error_code if v else None,
-                                     message=v.error_message if v else None))
+                                     message=v.error_message if v else None, job_id=pjob.id if pjob else None))
         except IngestError as e:
             db.rollback()
             results.append(BatchItem(filename=name, ok=False, error_code=e.code, message=e.message))
-    info = reindex(request, db, user.username) if (build_index and any_chunked) else IndexInfo(status="skipped")
+    info = reindex(request, db, user.username, kb.id) if (build_index and any_chunked) else IndexInfo(status="skipped")
+    db.expire_all()
     for r in results:   # report the post-index status
         if r.version_id:
-            r.status = db.get(DocumentVersion, r.version_id).status
+            vv = db.get(DocumentVersion, r.version_id)
+            r.status = vv.status
+            if vv.status == "failed":
+                r.ok, r.error_code, r.message = False, vv.error_code, vv.error_message
     ok = sum(1 for r in results if r.ok)
     audit(db, action="document.batch_upload", outcome="success" if ok == len(results) else "partial", actor=user.username,
           resource=kb.id, request_id=request_id(request), detail={"files": str(len(results)), "ok": ok, "failed": len(results) - ok})
@@ -173,26 +193,21 @@ async def batch_upload(kb_id: str, request: Request, files: List[UploadFile] = F
 
 @router.post("/documents/{doc_id}/versions", response_model=UploadOut, status_code=201, responses=ERR,
              summary="上传文档新版本；新版本建索引成功后才替换旧版本，失败时旧版本继续服务")
-async def new_version(doc_id: str, request: Request, file: UploadFile = File(...), build_index: bool = Query(True),
-                      user: User = Depends(manager_user), db: Session = Depends(get_db)):
+async def new_version(doc_id: str, request: Request, response: Response, file: UploadFile = File(...),
+                      build_index: bool = Query(True), user: User = Depends(manager_user), db: Session = Depends(get_db)):
     d = managed_doc(db, user, doc_id)
     if d.status == "deleted" or d.source != "upload":
         raise not_found()
     name = safe_filename(file.filename or "")
     try:
         data = await _read(file, request.app.state.settings.max_upload_bytes)
-        outcome, d, v = _ingest_one(request, db, d.kb, user, name, data, "", d.classification, None, "new_version", target=d)
+        kb_id = d.kb_id
+        outcome, d, v, pjob = _ingest_one(request, db, d.kb, user, name, data, "", d.classification, None,
+                                          "new_version", target=d)
     except IngestError as e:
         db.rollback()
         raise _ingest_error(e)
-    info = IndexInfo(status="skipped")
-    if build_index and v is not None and v.status == "chunked":
-        info = reindex(request, db, user.username)
-    db.refresh(d)
-    db.refresh(v)
-    audit(db, action="document.version", outcome=outcome, actor=user.username, resource=d.id, request_id=request_id(request),
-          detail={"version_no": v.version_no, "status": v.status, "error_code": v.error_code})
-    return UploadOut(outcome=outcome, document=DocumentOut.model_validate(d), version=VersionOut.model_validate(v), index=info)
+    return _finish_upload(request, response, db, user, kb_id, outcome, d, v, pjob, build_index, "document.version")
 
 
 @router.get("/documents/{doc_id}/versions", response_model=List[VersionOut], responses=ERR, summary="版本列表（知识库管理者）")
@@ -266,7 +281,8 @@ def _set_status(request: Request, db: Session, user: User, doc_id: str, status: 
         audit(db, action=f"document.{'enable' if status == 'active' else 'disable'}", outcome="success",
               actor=user.username, resource=d.id, request_id=request_id(request))
         if d.source == "upload":
-            reindex(request, db, user.username)
+            reindex(request, db, user.username, d.kb_id)
+    db.expire_all()
     return doc_status(doc_id, request, user, db)
 
 
@@ -292,7 +308,7 @@ def delete_doc(doc_id: str, request: Request, user: User = Depends(manager_user)
     db.commit()
     audit(db, action="document.delete", outcome="success", actor=user.username, resource=d.id, request_id=request_id(request))
     if d.source == "upload":
-        return reindex(request, db, user.username)
+        return reindex(request, db, user.username, d.kb_id)
     return IndexInfo(status="skipped")
 
 
@@ -315,3 +331,81 @@ def index_status(request: Request, admin: User = Depends(admin_user), db: Sessio
              summary="从数据库重建索引（平台管理员）：恢复失败的构建、补建 Dense、清除已删除文档")
 def index_rebuild(request: Request, admin: User = Depends(admin_user), db: Session = Depends(get_db)):
     return reindex(request, db, admin.username)
+
+
+# --- background jobs (P4) -------------------------------------------------------------------------------------------
+def _visible_job(db: Session, user: User, job_id: str) -> Job:
+    from ..acl_store import kb_by_id
+    j = db.get(Job, job_id) if isinstance(job_id, str) and len(job_id) <= 64 else None
+    if j is None:
+        raise not_found()
+    if user.is_admin:
+        return j
+    kb = kb_by_id(db, j.kb_id) if j.kb_id else None
+    if kb is None or not can_manage(db, user, kb):
+        raise not_found()
+    return j
+
+
+@router.get("/jobs", response_model=List[JobOut], responses=ERR, tags=["jobs"],
+            summary="后台任务列表（平台管理员看全部；知识库管理者看自己管理的知识库）")
+def list_jobs(kb_id: Optional[str] = Query(None, max_length=64), status: Optional[str] = Query(None, max_length=16),
+              document_id: Optional[str] = Query(None, max_length=64), limit: int = Query(50, ge=1, le=500),
+              user: User = Depends(manager_user), db: Session = Depends(get_db)):
+    from ..acl_store import kb_by_id
+    q = select(Job).order_by(Job.created_at.desc(), Job.id.desc())
+    if kb_id:
+        q = q.where(Job.kb_id == kb_id)
+    if status:
+        q = q.where(Job.status == status)
+    if document_id:
+        q = q.where(Job.document_id == document_id)
+    out = []
+    for j in db.scalars(q.limit(limit * 4)):
+        if user.is_admin or (j.kb_id and (kb := kb_by_id(db, j.kb_id)) is not None and can_manage(db, user, kb)):
+            out.append(j)
+        if len(out) >= limit:
+            break
+    return out
+
+
+@router.get("/jobs/{job_id}", response_model=JobOut, responses=ERR, tags=["jobs"], summary="任务状态与进度")
+def get_job(job_id: str, user: User = Depends(manager_user), db: Session = Depends(get_db)):
+    return _visible_job(db, user, job_id)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobOut, responses=ERR, tags=["jobs"],
+             summary="取消任务：排队中立即取消；运行中在下一个检查点停止，取消的索引任务不会激活新索引")
+def cancel_job(job_id: str, request: Request, user: User = Depends(manager_user), db: Session = Depends(get_db)):
+    j = _visible_job(db, user, job_id)
+    if j.status in ("succeeded", "failed", "cancelled"):
+        raise ApiError(409, "job_finished", "任务已结束，无法取消")
+    j = request.app.state.jobs.cancel(db, j)
+    audit(db, action="job.cancel", outcome=j.status, actor=user.username, resource=j.id, request_id=request_id(request))
+    return j
+
+
+@router.post("/jobs/{job_id}/retry", response_model=List[JobOut], responses=ERR, tags=["jobs"],
+             summary="重试失败或已取消的任务（文档处理任务会同时排队一次索引构建）")
+def retry_job(job_id: str, request: Request, user: User = Depends(manager_user), db: Session = Depends(get_db)):
+    j = _visible_job(db, user, job_id)
+    if j.status not in ("failed", "cancelled"):
+        raise ApiError(409, "job_not_retryable", "只有失败或已取消的任务可以重试")
+    runner = request.app.state.jobs
+    jobs = []
+    if j.kind == "process":
+        v = db.get(DocumentVersion, j.version_id) if j.version_id else None
+        d = db.get(Document, j.document_id) if j.document_id else None
+        if v is None or d is None or d.status == "deleted" or v.status in ("indexed", "superseded", "purged"):
+            raise ApiError(409, "job_not_retryable", "该版本已不需要重试")
+        v.status, v.error_code, v.error_message = "uploaded", None, None
+        db.commit()
+        jobs.append(runner.enqueue(db, "process", user.username, kb_id=j.kb_id, document_id=j.document_id,
+                                   version_id=j.version_id))
+        if jobs[-1].status not in ("failed", "cancelled"):
+            jobs.append(runner.enqueue(db, "index", user.username, kb_id=j.kb_id))
+    else:
+        jobs.append(runner.enqueue(db, "index", user.username, kb_id=j.kb_id))
+    audit(db, action="job.retry", outcome="queued", actor=user.username, resource=j.id, request_id=request_id(request))
+    db.expire_all()
+    return [db.get(Job, x.id) for x in jobs]

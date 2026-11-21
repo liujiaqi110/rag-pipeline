@@ -157,8 +157,11 @@ class IndexManager:
                 plan.append((d, chosen))
         return plan, deleted
 
-    def build(self, db: Session, actor: str) -> IndexGeneration:
-        """Build and activate a new generation, or raise IngestError leaving the active one in place."""
+    def build(self, db: Session, actor: str, checkpoint: Optional[Callable[[str], None]] = None) -> IndexGeneration:
+        """Build and activate a new generation, or raise IngestError leaving the active one in place.
+        ``checkpoint(stage)`` may raise (e.g. job cancellation): the build is then rolled back like a failure, except
+        that candidate versions return to ``chunked`` (not ``index_failed``) and the exception is re-raised."""
+        checkpoint = checkpoint or (lambda stage: None)
         with self.build_lock:
             plan, deleted = self._plan(db)
             gen = IndexGeneration(status="building", built_by=actor[:64])
@@ -173,6 +176,7 @@ class IndexManager:
                     recs = [dict(r.meta, chunk_id=r.chunk_id, text=r.text, source_file=d.doc_key) for r in rows]
                     per_version.append((v, recs))
                     children += recs
+                checkpoint("before_embed")
                 if self.fail_next_build == "before_write":
                     self.fail_next_build = None
                     raise IngestError("index_build_failed", "索引构建失败（模拟故障）", 500)
@@ -188,6 +192,7 @@ class IndexManager:
                         if self.settings.dense_mode == "required":
                             raise
                         dense_error = "embedding_model_unavailable"
+                checkpoint("before_write")
                 safe_rmtree(tmp, self.root)
                 man = write_generation(tmp, children, emb, model_name)
                 if self.fail_next_build == "after_write":
@@ -196,20 +201,26 @@ class IndexManager:
                 check = PlatformRetriever(tmp, None)               # load back before activating
                 if check.bm25.N != len(children):
                     raise IngestError("index_build_failed", "索引校验失败", 500)
+                checkpoint("before_activate")
                 final = self.gen_dir(gen.id)
                 tmp.rename(final)
-            except Exception as e:  # noqa: BLE001
+            except BaseException as e:  # noqa: BLE001 — incl. cancellation signals (BaseException)
                 safe_rmtree(tmp, self.root)
+                safe_rmtree(self.gen_dir(gen.id), self.root)
                 db.rollback()
-                code = e.code if isinstance(e, IngestError) else "index_build_failed"
+                cancelled = not isinstance(e, Exception)
+                code = e.code if isinstance(e, IngestError) else ("cancelled" if cancelled else "index_build_failed")
                 g = db.get(IndexGeneration, gen.id)
-                g.status, g.error_code = "failed", code
+                g.status, g.error_code = ("cancelled" if cancelled else "failed"), code
                 for _, v in plan:
                     vv = db.get(DocumentVersion, v.id)
                     if vv.status in INDEXABLE:
-                        vv.status, vv.error_code, vv.error_message = "index_failed", code, "索引构建失败，旧版本仍在服务，可重新构建"
+                        if cancelled:
+                            vv.status, vv.error_code, vv.error_message = "chunked", None, None
+                        else:
+                            vv.status, vv.error_code, vv.error_message = "index_failed", code, "索引构建失败，旧版本仍在服务，可重新构建"
                 db.commit()
-                if isinstance(e, IngestError):
+                if cancelled or isinstance(e, IngestError):
                     raise
                 raise IngestError("index_build_failed", "索引构建失败，旧索引保持不变，可重新构建", 500) from None
             # --- activate atomically ---------------------------------------------------------------------------------
@@ -310,8 +321,10 @@ class Ingestor:
         db.flush()
         return v
 
-    def process(self, db: Session, d: Document, v: DocumentVersion) -> DocumentVersion:
-        """parse → clean → chunk → store. Failures are recorded on the version only."""
+    def process(self, db: Session, d: Document, v: DocumentVersion,
+                checkpoint: Optional[Callable[[], None]] = None) -> DocumentVersion:
+        """parse → clean → chunk → store. Failures are recorded on the version only. ``checkpoint`` runs after
+        chunking and before anything is stored (cancellation point; its exception propagates)."""
         try:
             data = (self.index.root / v.storage_relpath).read_bytes()
             parsed = parsers.parse(v.original_filename, data)
@@ -321,6 +334,8 @@ class Ingestor:
             recs = chunker.chunk_text(cleaned, pages, d.doc_key, f"kb://{d.id}/v{v.version_no}")
             if not any(not r.get("is_parent") for r in recs):
                 raise IngestError("no_chunks", "没有生成任何 Chunk")
+            if checkpoint is not None:
+                checkpoint()
             for c in db.scalars(select(Chunk).where(Chunk.version_id == v.id)):
                 db.delete(c)
             for i, r in enumerate(recs):
