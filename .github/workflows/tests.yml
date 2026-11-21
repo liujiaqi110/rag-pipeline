@@ -44,3 +44,25 @@ jobs:
 
       - name: Example retrieval evaluation (BM25)
         run: python -m ragas_eval.retrieval_eval run --data build/example_data --modes bm25 --out build/eval
+
+  frontend:
+    # Vue workbench: type check, component/unit tests (Vitest + jsdom) and production build. No backend needed.
+    # The browser end-to-end suite (Playwright + real backend + local models) runs locally only: see docs/RUNBOOK.md.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vue-tsc --noEmit
+      - run: pnpm exec vitest run
+      - run: pnpm exec vite build
+

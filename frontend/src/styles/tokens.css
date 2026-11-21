@@ -1,0 +1,58 @@
+/* Design tokens — the single source of colours, spacing, radius, typography and elevation.
+   Components use these variables only; Element Plus variables are mapped onto them in global.css. */
+:root {
+  /* brand & semantic colours */
+  --kb-color-primary: #2f6bff;
+  --kb-color-primary-hover: #4d82ff;
+  --kb-color-primary-soft: #eaf0ff;
+  --kb-color-success: #1f9d55;
+  --kb-color-warning: #d48806;
+  --kb-color-danger: #d4380d;
+  --kb-color-info: #64748b;
+
+  /* neutrals (light theme: light-grey canvas, white cards) */
+  --kb-bg-page: #f3f5f9;
+  --kb-bg-card: #ffffff;
+  --kb-bg-subtle: #f8fafc;
+  --kb-bg-sidebar: #ffffff;
+  --kb-border: #e5e8ef;
+  --kb-border-strong: #d3d8e2;
+  --kb-text-primary: #1d2433;
+  --kb-text-regular: #3d4557;
+  --kb-text-secondary: #6b7385;
+  --kb-text-placeholder: #a0a7b6;
+
+  /* spacing scale (4px grid) */
+  --kb-space-1: 4px;
+  --kb-space-2: 8px;
+  --kb-space-3: 12px;
+  --kb-space-4: 16px;
+  --kb-space-5: 20px;
+  --kb-space-6: 24px;
+  --kb-space-8: 32px;
+
+  /* radius */
+  --kb-radius-sm: 4px;
+  --kb-radius-md: 8px;
+  --kb-radius-lg: 12px;
+
+  /* typography */
+  --kb-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --kb-font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --kb-font-xs: 12px;
+  --kb-font-sm: 13px;
+  --kb-font-md: 14px;
+  --kb-font-lg: 16px;
+  --kb-font-xl: 20px;
+  --kb-font-2xl: 24px;
+  --kb-line-height: 1.6;
+
+  /* elevation */
+  --kb-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --kb-shadow-pop: 0 8px 24px rgba(16, 24, 40, 0.12);
+
+  /* layout */
+  --kb-header-height: 56px;
+  --kb-sidebar-width: 220px;
+  --kb-content-max: 1440px;
+}
