@@ -1,0 +1,75 @@
+@import './tokens.css';
+
+/* Element Plus mapped onto the design tokens */
+:root {
+  --el-color-primary: var(--kb-color-primary);
+  --el-color-success: var(--kb-color-success);
+  --el-color-warning: var(--kb-color-warning);
+  --el-color-danger: var(--kb-color-danger);
+  --el-color-info: var(--kb-color-info);
+  --el-border-radius-base: var(--kb-radius-md);
+  --el-border-color: var(--kb-border);
+  --el-border-color-light: var(--kb-border);
+  --el-text-color-primary: var(--kb-text-primary);
+  --el-text-color-regular: var(--kb-text-regular);
+  --el-text-color-secondary: var(--kb-text-secondary);
+  --el-bg-color-page: var(--kb-bg-page);
+  --el-font-family: var(--kb-font-family);
+  --el-font-size-base: var(--kb-font-md);
+}
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  font-family: var(--kb-font-family);
+  font-size: var(--kb-font-md);
+  line-height: var(--kb-line-height);
+  color: var(--kb-text-regular);
+  background: var(--kb-bg-page);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- page & card system ---- */
+.kb-page { padding: var(--kb-space-6); max-width: var(--kb-content-max); margin: 0 auto; }
+.kb-page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--kb-space-5); gap: var(--kb-space-4); }
+.kb-page-title { font-size: var(--kb-font-xl); font-weight: 600; color: var(--kb-text-primary); margin: 0; }
+.kb-page-desc { margin: var(--kb-space-1) 0 0; color: var(--kb-text-secondary); font-size: var(--kb-font-sm); }
+.kb-card {
+  background: var(--kb-bg-card);
+  border: 1px solid var(--kb-border);
+  border-radius: var(--kb-radius-lg);
+  box-shadow: var(--kb-shadow-card);
+  padding: var(--kb-space-5);
+}
+.kb-card + .kb-card { margin-top: var(--kb-space-4); }
+.kb-grid > .kb-card + .kb-card { margin-top: 0; }   /* grid gap already spaces grid items */
+.kb-card-title { font-size: var(--kb-font-lg); font-weight: 600; color: var(--kb-text-primary); margin: 0 0 var(--kb-space-4); display: flex; align-items: center; justify-content: space-between; }
+.kb-toolbar { display: flex; align-items: center; gap: var(--kb-space-3); flex-wrap: wrap; margin-bottom: var(--kb-space-4); }
+.kb-grid { display: grid; gap: var(--kb-space-4); }
+.kb-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.kb-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kb-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1280px) { .kb-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1024px) { .kb-grid-3, .kb-grid-2 { grid-template-columns: 1fr; } }
+.kb-muted { color: var(--kb-text-secondary); font-size: var(--kb-font-sm); }
+.kb-mono { font-family: var(--kb-font-mono); font-size: var(--kb-font-xs); }
+.kb-empty { padding: var(--kb-space-8); text-align: center; color: var(--kb-text-secondary); }
+
+/* ---- table & dialog conventions ---- */
+.el-table { --el-table-header-bg-color: var(--kb-bg-subtle); --el-table-row-hover-bg-color: var(--kb-color-primary-soft); }
+.el-table th.el-table__cell { font-weight: 600; color: var(--kb-text-primary); }
+.el-dialog { border-radius: var(--kb-radius-lg); }
+.el-dialog__header { border-bottom: 1px solid var(--kb-border); margin-right: 0; padding-bottom: var(--kb-space-4); }
+.el-dialog__footer { border-top: 1px solid var(--kb-border); padding-top: var(--kb-space-4); }
+.el-drawer__header { margin-bottom: 0; padding-bottom: var(--kb-space-4); border-bottom: 1px solid var(--kb-border); color: var(--kb-text-primary); font-weight: 600; }
+
+/* ---- markdown ---- */
+.kb-markdown { line-height: 1.75; color: var(--kb-text-primary); word-break: break-word; }
+.kb-markdown p { margin: 0 0 var(--kb-space-2); }
+.kb-markdown pre { background: #0f172a; color: #e2e8f0; padding: var(--kb-space-3); border-radius: var(--kb-radius-md); overflow: auto; font-family: var(--kb-font-mono); font-size: var(--kb-font-sm); }
+.kb-markdown code { font-family: var(--kb-font-mono); background: var(--kb-bg-subtle); padding: 1px 4px; border-radius: var(--kb-radius-sm); }
+.kb-markdown pre code { background: transparent; padding: 0; }
+.kb-markdown table { border-collapse: collapse; margin: var(--kb-space-2) 0; }
+.kb-markdown th, .kb-markdown td { border: 1px solid var(--kb-border); padding: 4px 8px; }
+.kb-cite { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; margin: 0 2px;
+  font-size: 11px; font-weight: 600; color: var(--kb-color-primary); background: var(--kb-color-primary-soft); border-radius: 9px; vertical-align: super; cursor: pointer; }

@@ -1,0 +1,16 @@
+# Knowledge platform backend (kb_platform/, phase 2). Install into a separate venv: python -m venv .venv
+fastapi==0.141.1
+pydantic==2.13.4
+sqlalchemy>=2.0,<2.1
+httpx==0.28.1        # FastAPI TestClient (API tests)
+uvicorn==0.52.0      # local server
+pyyaml==6.0.3
+alembic>=1.13,<2          # database migrations (P4)
+PyJWT>=2.8,<3             # revocable JWT access tokens (P4)
+python-multipart==0.0.32   # file uploads (P3)
+numpy>=2,<3                # index generations / Dense
+pypdf>=5,<7                # PDF parsing (P3)
+python-docx>=1.1,<2        # DOCX parsing (P3)
+# Optional, NOT needed for CI: real Dense with BAAI/bge-m3 (tests_local/test_kb_platform_real.py)
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch
+#   pip install "sentence-transformers>=3,<6"

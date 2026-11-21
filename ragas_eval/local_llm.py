@@ -89,6 +89,44 @@ class OllamaClient:
                          done_reason=r.get("done_reason"))
 
 
+    def chat_stream(self, messages: List[Dict[str, str]], options: Dict[str, Any],
+                    on_delta: Callable[[str], None]) -> GenResult:
+        """Same as ``chat`` but with ``stream: true``; ``on_delta`` receives each text fragment as it arrives.
+        Returns the complete result (identical shape to ``chat``) so callers can validate the full answer."""
+        payload = {"model": self.model, "messages": messages, "stream": True, "options": options}
+        req = urllib.request.Request(self.base + "/api/chat", data=json.dumps(payload).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        t0, parts, last = time.perf_counter(), [], {}
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                for line in r:
+                    if not line.strip():
+                        continue
+                    obj = json.loads(line.decode("utf-8"))
+                    piece = (obj.get("message") or {}).get("content") or ""
+                    if piece:
+                        parts.append(piece)
+                        on_delta(piece)
+                    if obj.get("done"):
+                        last = obj
+                        break
+        except urllib.error.HTTPError as e:
+            raise GenerationError("http_error", f"HTTP {e.code}") from None
+        except (urllib.error.URLError, ConnectionError) as e:
+            raise GenerationError("unavailable", type(e).__name__) from None
+        except TimeoutError:
+            raise GenerationError("timeout", "timeout") from None
+        text = "".join(parts).strip()
+        if not text:
+            raise GenerationError("empty_response", f"done_reason={last.get('done_reason')}")
+        ns = lambda k: round(last[k] / 1e6, 2) if isinstance(last.get(k), (int, float)) else None  # noqa: E731
+        return GenResult(text=text, model=last.get("model", self.model), prompt_tokens=last.get("prompt_eval_count"),
+                         output_tokens=last.get("eval_count"), total_ms=round((time.perf_counter() - t0) * 1000, 2),
+                         ollama_total_ms=ns("total_duration"), load_ms=ns("load_duration"),
+                         prompt_eval_ms=ns("prompt_eval_duration"), eval_ms=ns("eval_duration"),
+                         done_reason=last.get("done_reason"))
+
+
 class MockLLM:
     """Deterministic stand-in for tests: ``responder(messages) -> text``. Token counts are reported as unavailable."""
 

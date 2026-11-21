@@ -43,7 +43,7 @@ def prompt_hash() -> str:
 
 @dataclass
 class PipelineConfig:
-    mode: str = "dense"            # dense | rrf
+    mode: str = "dense"            # dense | rrf | bm25 (explicit, platform only)
     top_k: int = 5
     context_char_budget: int = 6000
     options: Dict[str, Any] = field(default_factory=lambda: {"temperature": 0, "seed": 42, "num_predict": 512, "num_ctx": 8192})
@@ -134,6 +134,8 @@ class RagPipeline:
             return [r["chunk"]["chunk_id"] for r in self.R.dense(q)]
         if self.cfg.mode == "rrf":
             return [r["chunk"]["chunk_id"] for r in self.R.rrf(q)]
+        if self.cfg.mode == "bm25":  # explicit BM25-only mode (knowledge platform without a Dense model); zero scores dropped
+            return [r["chunk"]["chunk_id"] for r in self.R.bm25_full(q) if (r.get("bm25_score") or 0) > 0]
         raise ValueError(f"unknown mode {self.cfg.mode}")
 
     def answer(self, question: str) -> RagResponse:
