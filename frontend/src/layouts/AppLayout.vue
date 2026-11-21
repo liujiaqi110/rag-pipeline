@@ -11,13 +11,21 @@
       <el-menu :default-active="active" router class="menu">
         <el-menu-item index="/chat"><el-icon><ChatDotRound /></el-icon><span>AI 问答</span></el-menu-item>
         <el-menu-item index="/knowledge"><el-icon><Files /></el-icon><span>知识管理</span></el-menu-item>
+        <el-sub-menu v-if="auth.managesAny" index="ops">
+          <template #title><el-icon><DataAnalysis /></el-icon><span>知识运营</span></template>
+          <el-menu-item index="/ops/dashboard" data-testid="menu-ops-dashboard">运营看板</el-menu-item>
+          <el-menu-item index="/ops/faq" data-testid="menu-faq">FAQ 候选审核</el-menu-item>
+          <el-menu-item index="/ops/faq-published">已发布 FAQ</el-menu-item>
+          <el-menu-item index="/ops/gaps" data-testid="menu-gaps">知识缺口</el-menu-item>
+          <el-menu-item index="/ops/tasks">知识补充任务</el-menu-item>
+        </el-sub-menu>
         <el-sub-menu v-if="auth.isAdmin" index="acl">
           <template #title><el-icon><Lock /></el-icon><span>权限管理</span></template>
           <el-menu-item index="/acl/users">用户</el-menu-item>
           <el-menu-item index="/acl/roles">角色</el-menu-item>
           <el-menu-item index="/acl/departments">部门</el-menu-item>
         </el-sub-menu>
-        <el-sub-menu v-if="auth.isAdmin" index="ops">
+        <el-sub-menu v-if="auth.isAdmin" index="platform">
           <template #title><el-icon><Monitor /></el-icon><span>平台管理</span></template>
           <el-menu-item index="/admin/system">系统状态</el-menu-item>
           <el-menu-item index="/admin/audit">审计日志</el-menu-item>
@@ -50,13 +58,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, ChatDotRound, Files, Lock, Monitor } from '@element-plus/icons-vue'
+import { ArrowDown, ChatDotRound, DataAnalysis, Files, Lock, Monitor } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const active = computed(() => '/' + (route.path.split('/')[1] || 'chat') + (route.path.startsWith('/acl') || route.path.startsWith('/admin') ? '/' + route.path.split('/')[2] : ''))
+const active = computed(() => '/' + (route.path.split('/')[1] || 'chat') + (['/acl', '/admin', '/ops'].some((p) => route.path.startsWith(p)) ? '/' + route.path.split('/')[2] : ''))
 const title = computed(() => route.meta.title || '')
 const initials = computed(() => (auth.me?.display_name || auth.me?.username || '?').slice(0, 1).toUpperCase())
 

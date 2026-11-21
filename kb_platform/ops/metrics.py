@@ -18,7 +18,8 @@ DEFINITIONS = {
     "pv": "页面访问次数：工作台每次路由切换记录一行（只记路由名），统计窗口内的行数",
     "uv": "独立访问用户数：统计窗口内有页面访问记录的不同用户数",
     "questions": "用户提问次数：qa_events 行数（每个问题一行，无论结果如何）",
-    "llm_calls": "模型调用次数：qa_events.llm_calls 之和（FAQ 命中和答案缓存命中为 0）",
+    "llm_calls": "模型调用次数：用户提问触发的真实模型调用，qa_events.llm_calls 之和（FAQ 命中和答案缓存命中为 0）；"
+                 "FAQ 候选答案生成、缺口验证等系统调用不计入，记录在后台任务（jobs）中",
     "faq_hits": "FAQ 命中次数：source=faq 的提问数；也等于节省的模型调用次数",
     "answer_cache_hits": "答案缓存命中次数：source=answer_cache 的提问数（同一用户权限范围内的重复问题）",
     "failed": "失败请求：outcome 为 generation_failure（模型失败）或 infrastructure（检索/索引/服务故障）的提问",

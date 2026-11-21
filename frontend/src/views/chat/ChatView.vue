@@ -32,7 +32,8 @@
                   <el-alert v-else-if="m.error" type="error" :closable="false" show-icon :title="m.error" data-testid="answer-error" />
                   <template v-else>
                     <div v-if="!m.answer && m.streaming" class="kb-muted thinking"><el-icon class="spin"><Loading /></el-icon> 正在检索有权访问的资料…</div>
-                    <AnswerView v-else :answer="m.answer" :citations="m.citations" :streaming="m.streaming" @open="openSource" />
+                    <el-tag v-if="m.source === 'faq'" type="success" effect="plain" size="small" class="faq-tag" data-testid="faq-badge">FAQ 标准答案 · 已审核 · 未调用模型</el-tag>
+                    <AnswerView v-if="m.answer || !m.streaming" :answer="m.answer" :citations="m.citations" :streaming="m.streaming" @open="openSource" />
                     <el-alert v-if="statusNotice(m)" :type="statusNotice(m)!.type" :closable="false" show-icon :title="statusNotice(m)!.text" class="notice" data-testid="answer-notice" />
                   </template>
                 </div>
@@ -87,7 +88,7 @@ import { statusNotice as notice } from '@/utils/answer'
 import AnswerView from '@/components/AnswerView.vue'
 import SourceDrawer from '@/components/SourceDrawer.vue'
 
-interface Msg { key: string; question: string; answer: string; citations: Citation[]; status: string; hidden: boolean; streaming: boolean; revoked: boolean; error: string }
+interface Msg { key: string; question: string; answer: string; citations: Citation[]; status: string; hidden: boolean; streaming: boolean; revoked: boolean; error: string; source?: string }
 const route = useRoute()
 const router = useRouter()
 const sessions = ref<SessionOut[]>([])
@@ -151,7 +152,7 @@ async function send() {
   try {
     await streamPost(`/sessions/${detail.value.id}/ask/stream`, { question: q }, (ev) => {
       if (ev.event === 'delta') { msg.answer += ev.data.text; scrollDown() }
-      else if (ev.event === 'final') { msg.answer = ev.data.answer; msg.citations = ev.data.citations; msg.status = ev.data.status; msg.streaming = false; msg.key = String(ev.data.message_id) }
+      else if (ev.event === 'final') { msg.answer = ev.data.answer; msg.citations = ev.data.citations; msg.status = ev.data.status; msg.source = ev.data.source; msg.streaming = false; msg.key = String(ev.data.message_id) }
       else if (ev.event === 'revoked') { msg.answer = ''; msg.citations = []; msg.revoked = true; msg.streaming = false }
       else if (ev.event === 'error') { msg.answer = ''; msg.error = ev.data.message || '回答生成失败'; msg.streaming = false }
     }, abort.signal)
@@ -205,6 +206,7 @@ onMounted(async () => {
 .bot { background: var(--kb-color-primary-soft); color: var(--kb-color-primary); font-weight: 700; flex-shrink: 0; }
 .bubble-a { flex: 1; background: var(--kb-bg-card); border: 1px solid var(--kb-border); border-radius: var(--kb-radius-lg); padding: var(--kb-space-4); box-shadow: var(--kb-shadow-card); min-width: 0; }
 .notice { margin-top: var(--kb-space-3); }
+.faq-tag { margin-bottom: var(--kb-space-2); }
 .thinking { display: flex; align-items: center; gap: var(--kb-space-2); }
 .composer { background: var(--kb-bg-card); border-top: 1px solid var(--kb-border); padding: var(--kb-space-4) var(--kb-space-6); display: flex; gap: var(--kb-space-3); align-items: flex-end; }
 .composer > :first-child { flex: 1; }

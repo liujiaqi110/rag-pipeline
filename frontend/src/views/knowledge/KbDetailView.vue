@@ -64,7 +64,7 @@
       <h3 class="kb-card-title">知识库管理者 <span class="kb-muted">可上传、编辑、删除文档和配置权限；管理权限不包含阅读权限</span></h3>
       <div class="kb-toolbar">
         <el-tag v-for="m in managers" :key="m" closable @close="removeManager(m)">{{ m }}</el-tag>
-        <el-select v-model="newManager" filterable placeholder="添加管理者" class="mgr" @change="addManager">
+        <el-select v-model="newManager" filterable placeholder="添加管理者" class="mgr" data-testid="kb-manager-add" @change="addManager">
           <el-option v-for="u in userOptions" :key="u" :label="u" :value="u" />
         </el-select>
       </div>
