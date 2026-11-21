@@ -106,8 +106,23 @@ def ask(session_id: str, body: AskIn, request: Request, user: User = Depends(cur
         summary = {"status": "access_denied", "reason": "policy_error", "llm_calls": 0, "scope_key": ""}
         cached = False
     else:
+        backend = request.app.state.backend
+        retriever, generation = None, "external"
+        if not backend.external:
+            gen = backend.index.active_generation(db)
+            if gen is None:
+                audit(db, action="chat.ask", outcome="error", actor=user.username, resource=s.id, request_id=rid,
+                      detail={**fp, "error": "index_unavailable"})
+                raise ApiError(503, "index_unavailable", "知识库索引尚未构建，请联系管理员")
+            retriever, generation = backend.index.retriever(gen), gen.id
+            if backend.mode == "rrf" and not retriever.has_dense:
+                audit(db, action="chat.ask", outcome="error", actor=user.username, resource=s.id, request_id=rid,
+                      detail={**fp, "error": "dense_unavailable", "generation": gen.id})
+                raise ApiError(503, "dense_unavailable", "向量检索不可用：当前索引没有 Dense 部分或本地向量模型无法加载。"
+                                                         "安装模型后由管理员执行 POST /api/v1/index/rebuild")
         try:
-            user_resp, summary, cached = request.app.state.backend.ask(policy, user.username, s.kb_id, body.question)
+            user_resp, summary, cached = backend.ask(policy, user.username, s.kb_id, body.question,
+                                                     retriever=retriever, generation=generation)
         except FileNotFoundError:
             audit(db, action="chat.ask", outcome="error", actor=user.username, resource=s.id, request_id=rid,
                   detail={**fp, "error": "index_unavailable"})

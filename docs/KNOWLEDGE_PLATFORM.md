@@ -8,8 +8,9 @@
 |---|---|---|
 | 第一阶段 | ACL 权限管理：身份模型、文档级策略、默认拒绝、检索候选阶段过滤、强制安全层、隔离测试 | **已完成**（本分支） |
 | 第二阶段 | 企业知识库后端：FastAPI + Pydantic + SQLAlchemy（SQLite），认证、身份与 ACL 持久化、知识库/文档 API、ACL 问答 API、会话隔离、审计、OpenAPI、API 测试 | **已完成**（本分支） |
-| 第二阶段遗留 | Alembic 迁移与 PostgreSQL 验证、OIDC/SSO、文档入库 API、按租户建索引等（见下文） | 待开始 |
-| 第三阶段 | 接入 4.1 RAG 模型微调实验（在 ACL 约束下构造训练/评估数据） | 待开始 |
+| 第三阶段 | 文档管理与自动索引：四种格式上传/批量上传、解析→清洗→切片（复用 03/04/05）→BM25/Dense 索引代际、版本、停用/删除、知识库管理者、故障恢复 | **已完成**（本分支） |
+| 遗留 | Alembic 迁移与 PostgreSQL 验证、OIDC/SSO、异步任务队列、按租户建索引等（见各阶段“遗留问题”） | 待开始 |
+| 后续 | 接入 4.1 RAG 模型微调实验 | 未开始，需确认后再进行 |
 
 ## 第一阶段：ACL 权限管理
 
@@ -168,7 +169,84 @@ $env:KB_ADMIN_PASSWORD="<至少10位，含字母和数字>"
 6. 按租户或密级分别建索引、`retrieval_eval` 支持 ACL、`tests_local` 增加真实模型的 ACL 用例，仍未完成。
 7. 真实 bge-m3 + Ollama 的端到端问答在本机没有验证（缺少 sentence-transformers 和模型）；已用真实 uvicorn + HTTP + 合成语料 + 模拟 LLM 完成冒烟测试。
 
-## 第三阶段：接入 4.1 RAG 模型微调实验
+## 第三阶段：文档管理与自动索引
+
+### 开始前检查结论
+
+- **Token**：第二阶段的需求原文没有指定 JWT；实现的是服务端保存哈希的随机不透明 Token。它能立即注销或撤销（登出、停用、权限变更后旧 Token 立即失效），而 JWT 在过期前通常无法撤销，除非另加黑名单。本阶段**没有改为 JWT**；如需 JWT（例如对接 OIDC），列为遗留项。
+- **撤权后的历史会话**：每条回答都记录了生成时的 scope_key（主体指纹 + 策略哈希），撤权后历史回答被隐藏（第二阶段测试已覆盖，本阶段又在上传文档上验证了一遍）。
+- **缓存**：第二阶段的缓存键不包含索引内容版本，文档内容更新后可能命中旧答案。本阶段把**索引代际 ID** 加入缓存键，并在每次索引切换后清空缓存。
+- **认证边界**：上传接口的表单里即使带 `user_id`、`created_by`，`created_by` 也只取 Token 中的用户（有测试）。
+
+### 处理流水线
+
+```
+上传（大小 / 扩展名 / 内容魔数校验）→ 服务器命名存储 build/kb_storage/uploads/<文档>/<版本>/original.<ext>
+→ 解析（md / txt：UTF-8、GB18030；pdf：pypdf 按页；docx：python-docx，标题样式转 #，表格转 a | b）
+→ 清洗（NFC、换行、单独成行的页码、PDF 断行合并；不删除“机密/Copyright”等可能是正文的内容）
+→ 切片：原样调用 scripts/03 chunk_document → 04 fix_chunks → 05 enrich_chunks + build_parent_child
+→ Chunk 元数据：source_file（= 文档唯一 doc_key）、页码（PDF）、段落序号、Chunk ID（03/05 原算法）
+→ 索引代际：scripts/06 SimpleBM25 + 与 06 相同格式的 Dense（bge-m3，按版本缓存向量）
+→ 校验后在一个事务中激活 → 可检索
+```
+
+- 切片没有重写：有测试证明对公开示例文档，平台切片结果与 `scripts/build_example_index.py` 的 Chunk ID、文本、父子关系完全一致。
+- 检索没有重写：`PlatformRetriever` 继承 `rag_retriever.Retriever`，只改变索引文件和模型的加载方式，`dense / bm25_full / rrf` 是原方法。
+- 新增的检索相关代码只有 `RagPipeline` 的显式 `bm25` 模式（`KB_RETRIEVAL_MODE=bm25`），供没有向量模型的部署使用；默认仍是 RRF。RRF 模式下缺少 Dense 时返回 503，**不会悄悄退化为 BM25**。
+
+### 一致性规则
+
+1. 数据库是唯一的事实来源。索引代际从数据库构建：每个**启用**的上传文档取最新的待索引版本，没有则取当前版本。
+2. 新代际写入临时目录，重新加载校验后再改名；然后在**一个事务**里：新代际设为 active、版本设为 indexed 并成为当前版本、旧版本设为 superseded、已删除文档的 Chunk 和文件被清除。
+3. 任何一步失败：旧代际和所有当前版本保持不变，待索引版本标记为 `index_failed`，可通过 `POST /api/v1/index/rebuild` 恢复。
+4. 停用、归档、删除立即从 ACL 策略中排除（重建之前也查不到），并从下一代索引中移除。
+5. 缺少本地模型：`KB_DENSE=auto` 时构建只含 BM25 的代际，并记录 `dense_error=embedding_model_unavailable`；RRF 问答返回 503 `dense_unavailable`；安装模型后重建即可恢复。`KB_DENSE=required` 时构建失败，旧索引保持不变。
+
+### 权限
+
+- 新上传的文档**没有任何读取授权**，上传者和平台管理员也读不到内容。
+- 授权方式保留四种：global（`all_authenticated`）、department、role、user。
+- 操作权限（上传、版本、修改、停用、删除、修改 ACL）：平台管理员，或该知识库的**知识库管理者**（新增，由平台管理员指定）。管理权限不包含阅读权限：管理者能看到 Chunk 的元数据，但看不到正文，问答中也检索不到，除非另有 ACL 授权。
+- 索引构建不涉及 ACL：每次请求仍由第一阶段的引擎按数据库策略在候选阶段过滤。
+
+### 新增 API（前缀 `/api/v1`）
+
+| 方法 | 路径 | 权限 | 说明 |
+|---|---|---|---|
+| POST | `/knowledge-bases/{kb_id}/documents/upload` | 管理者 | 单文件上传并自动处理、建索引；`on_duplicate=reject|new_version|skip`，`build_index=true|false` |
+| POST | `/knowledge-bases/{kb_id}/documents/batch-upload` | 管理者 | 批量上传；逐个文件返回结果，单个失败不影响其他文件，最后统一建一次索引 |
+| POST/GET | `/documents/{doc_id}/versions` | 管理者 | 上传新版本 / 版本列表 |
+| GET | `/documents/{doc_id}/status` | 可读用户或管理者 | 处理与索引状态、是否可检索 |
+| GET | `/documents/{doc_id}/chunks` | 可读用户或管理者 | Chunk 列表（页码、段落）；正文只给有阅读权限的用户 |
+| POST | `/documents/{doc_id}/disable`、`/enable` | 管理者 | 停用 / 启用 |
+| DELETE | `/documents/{doc_id}` | 管理者 | 删除：立即失效，重建成功后清除 Chunk 和文件 |
+| GET/POST/DELETE | `/knowledge-bases/{kb_id}/managers` | 平台管理员 | 知识库管理者 |
+| GET | `/index/status` | 平台管理员 | 当前代际、最近代际、向量模型状态、待索引/失败版本数 |
+| POST | `/index/rebuild` | 平台管理员 | 从数据库重建：恢复失败、补建 Dense、清除已删除文档 |
+
+已有接口没有删除；`PATCH /documents/{id}` 的 `status` 增加了 `disabled`，`DocumentOut` 增加了 `source`、`original_filename`、`current_version_id` 字段（均为新增）。
+
+### 测试
+
+| 类别 | 数量 | 说明 |
+|---|---|---|
+| P1 `ragas_eval/tests` | 102（通过 96，跳过 6） | 跳过的都是依赖未发布研究输出的原有测试 |
+| P2 + P3 `kb_platform/tests` | 65（全部通过） | 其中 P3 新增 26 个：解析与切片 11 个、上传/索引 API 15 个 |
+| 真实集成 `tests_local` | 4（全部通过，本机运行，CI 不运行） | `test_kb_platform_real.py` 2 个（真实 bge-m3 + 真实 Ollama qwen2.5:7b），原有 `test_local_integration.py` 2 个 |
+
+`kb_platform/tests` 中的 Dense 使用**哈希假向量**（`FakeEmbedder`，不是语义模型），只用来覆盖 Dense 代码路径；语义检索效果只以 `tests_local/test_kb_platform_real.py` 的结果为准。
+
+### 第三阶段遗留问题
+
+1. 处理是同步的（上传请求内完成解析和建索引）；大文件或大量文档需要任务队列（Celery/RQ）和进度查询。
+2. 每次建索引都是全量重建 BM25（向量按版本缓存，不会重复编码）；文档量大时需要增量索引或分片。
+3. PDF 不支持 OCR（扫描件返回 `no_text`）；PDF 表格和多栏排版的解析质量没有评估；中文 PDF 只在真实环境中用 pypdf 验证过文本型文件（测试用 PDF 是英文的，因为生成中文 PDF 需要嵌入字体）。
+4. 页码通过在清洗后的文本中查找 Chunk 文本来定位；被 04 边界修正大幅改写的 Chunk 可能定位不到（页码为空）。
+5. 单进程：构建锁和检索器缓存都在进程内；多副本部署需要分布式锁和共享存储。
+6. 数据库新增了列（`documents.source / original_filename / current_version_id`），没有 Alembic；第二阶段生成的本地 SQLite 库需要删除后重新初始化。
+7. 被删除文档的审计记录和版本元数据会保留（用于审计），文件和 Chunk 会被清除；尚未提供“彻底清除元数据”的接口。
+
+## 后续阶段：接入 4.1 RAG 模型微调实验（未开始，需确认）
 
 1. 训练/评估样本只从授权上下文中构造，每条样本记录 `user_id` 和 `policy_version`，禁止把跨权限的上下文拼成同一条样本。
 2. 拒答样本：用“无权访问”的问题构造正确拒答的训练数据，让模型不会凭记忆回答受限内容。

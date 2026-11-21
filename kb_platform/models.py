@@ -88,7 +88,11 @@ class Document(Base):
     title: Mapped[str] = mapped_column(String(255), default="")
     classification: Mapped[str] = mapped_column(String(32), default="internal")
     owner_department: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), default="active")  # active | archived
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | disabled | archived | deleted
+    # P3: "metadata" = registered without a file (external index, P2); "upload" = managed by the ingestion pipeline
+    source: Mapped[str] = mapped_column(String(16), default="metadata")
+    original_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    current_version_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # version being served
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     kb: Mapped[KnowledgeBase] = relationship(back_populates="documents")
@@ -151,3 +155,69 @@ class AuditLog(Base):
     resource: Mapped[str] = mapped_column(String(128), default="")
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class KbManager(Base):
+    """P3: users allowed to upload / edit / delete documents and edit ACLs in ONE knowledge base. Managing a document
+    does NOT grant reading it: content access still needs an ACL grant (default: none)."""
+    __tablename__ = "kb_managers"
+    kb_id: Mapped[str] = mapped_column(ForeignKey("knowledge_bases.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+
+
+class DocumentVersion(Base):
+    """One uploaded file. status: uploaded → chunked → indexed | failed | index_failed; superseded when a newer
+    version is indexed; purged after the document is deleted and the index no longer contains it."""
+    __tablename__ = "document_versions"
+    __table_args__ = (UniqueConstraint("document_id", "version_no", name="uq_version_no"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), default="")
+    file_format: Mapped[str] = mapped_column(String(16), default="")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    sha256: Mapped[str] = mapped_column(String(64), default="")
+    storage_relpath: Mapped[str] = mapped_column(String(255), default="")  # relative to KB_STORAGE_DIR, server-chosen
+    status: Mapped[str] = mapped_column(String(16), default="uploaded")
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # fixed user-safe text only
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    indexed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    generation_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+
+class Chunk(Base):
+    __tablename__ = "chunks"
+    __table_args__ = (UniqueConstraint("version_id", "chunk_id", name="uq_version_chunk"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version_id: Mapped[str] = mapped_column(ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False)
+    chunk_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, default=0)
+    is_parent: Mapped[bool] = mapped_column(Boolean, default=False)
+    parent_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    section_heading: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    paragraph: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    char_count: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(Text, default="")
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)  # full chunk record from scripts 03/04/05
+
+
+class IndexGeneration(Base):
+    """An immutable on-disk BM25 (+ Dense) index built from the database. Exactly one is ``active``; a failed build
+    never replaces the active one."""
+    __tablename__ = "index_generations"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    status: Mapped[str] = mapped_column(String(16), default="building")  # building | active | retired | failed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    activated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    document_count: Mapped[int] = mapped_column(Integer, default=0)
+    dense: Mapped[bool] = mapped_column(Boolean, default=False)
+    dense_model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    dense_error: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    built_by: Mapped[str] = mapped_column(String(64), default="")

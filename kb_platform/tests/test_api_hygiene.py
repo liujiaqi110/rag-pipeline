@@ -115,7 +115,7 @@ class TestLogsAndAudit(ApiCase):
         ask = next(r for r in rows if r["action"] == "chat.ask")
         self.assertEqual(set(ask["detail"]) - {"question_sha256", "question_chars", "status", "llm_calls",
                                                "authorized_documents", "authorized_chunks", "policy_version",
-                                               "error", "cached", "citations", "kb_id", "reason"}, set())
+                                               "error", "cached", "citations", "kb_id", "reason", "generation", "mode"}, set())
 
 
 class TestLegacyEntryNotExposed(unittest.TestCase):

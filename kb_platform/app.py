@@ -1,6 +1,6 @@
 """FastAPI application factory.
 
-    uvicorn kb_platform.app:create_app --factory          # uses env KB_DATABASE_URL, RAG_DATA_DIR
+    uvicorn kb_platform.app:create_app --factory   # env: KB_DATABASE_URL, KB_STORAGE_DIR, KB_DENSE, KB_RETRIEVAL_MODE
 
 OpenAPI: ``/docs`` (Swagger UI), ``/redoc``, ``/openapi.json``; a snapshot is kept in ``docs/openapi.json``
 (``python -m kb_platform.cli export-openapi``).
@@ -27,7 +27,7 @@ from .audit import install_log_filter
 from .db import init_db, make_engine, make_sessionmaker
 from .deps import ApiError
 from .rag_backend import AnswerCache, RagBackend
-from .routers import admin, audit_log, auth, chat, knowledge
+from .routers import admin, audit_log, auth, chat, documents, knowledge
 from .settings import Settings
 
 log = logging.getLogger("kb_platform")
@@ -35,7 +35,9 @@ RID = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 TAGS = [
     {"name": "auth", "description": "登录、注销、当前身份。身份只来自 Bearer Token"},
     {"name": "admin", "description": "用户、角色、部门管理（平台管理员）"},
-    {"name": "knowledge", "description": "知识库、文档元数据与文档 ACL"},
+    {"name": "knowledge", "description": "知识库、文档元数据、文档 ACL、知识库管理者"},
+    {"name": "documents", "description": "文档上传、批量上传、版本、处理状态、Chunk、停用/启用/删除"},
+    {"name": "index", "description": "索引代际状态与重建（平台管理员）"},
     {"name": "chat", "description": "会话与带 ACL 的知识库问答"},
     {"name": "audit", "description": "审计日志（平台管理员）"},
 ]
@@ -58,7 +60,11 @@ def create_app(settings: Optional[Settings] = None, backend: Optional[RagBackend
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessionmaker = make_sessionmaker(engine)
-    app.state.backend = backend or RagBackend(cache=AnswerCache(settings.answer_cache_size, settings.answer_cache_ttl_s))
+    if backend is None:
+        from .ingest.manager import IndexManager
+        backend = RagBackend(index=IndexManager(settings), mode=settings.retrieval_mode,
+                             cache=AnswerCache(settings.answer_cache_size, settings.answer_cache_ttl_s))
+    app.state.backend = backend
 
     @app.middleware("http")
     async def request_id_mw(request: Request, call_next):
@@ -99,6 +105,6 @@ def create_app(settings: Optional[Settings] = None, backend: Optional[RagBackend
     def health():
         return {"status": "ok", "version": __version__}
 
-    for r in (auth.router, admin.router, knowledge.router, chat.router, audit_log.router):
+    for r in (auth.router, admin.router, knowledge.router, documents.router, chat.router, audit_log.router):
         app.include_router(r)
     return app

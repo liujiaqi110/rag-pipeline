@@ -112,7 +112,7 @@ class DocumentUpdateIn(Req):
     title: Optional[str] = Field(default=None, max_length=255)
     classification: Optional[Classification] = None
     owner_department: Optional[str] = Field(default=None, pattern=NAME)
-    status: Optional[Literal["active", "archived"]] = None
+    status: Optional[Literal["active", "disabled", "archived"]] = None  # deletion: DELETE /documents/{id}
 
 
 class DocumentOut(Out):
@@ -125,6 +125,9 @@ class DocumentOut(Out):
     status: str
     created_at: datetime
     updated_at: datetime
+    source: str = "metadata"
+    original_filename: Optional[str] = None
+    current_version_id: Optional[str] = None
 
 
 class Subjects(Req):
@@ -147,6 +150,120 @@ class DocumentAclOut(BaseModel):
     allow: dict
     deny: dict
     acl_version: int
+
+
+class ManagerIn(Req):
+    username: str = Field(pattern=NAME)
+
+
+# --- P3 ingestion -------------------------------------------------------------------------------------------------
+class VersionOut(Out):
+    id: str
+    document_id: str
+    version_no: int
+    original_filename: str
+    file_format: str
+    size_bytes: int
+    sha256: str
+    status: str
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    chunk_count: int
+    page_count: Optional[int] = None
+    created_by: str
+    created_at: datetime
+    indexed_at: Optional[datetime] = None
+    generation_id: Optional[str] = None
+
+
+class IndexInfo(BaseModel):
+    status: Literal["active", "failed", "skipped"]
+    generation_id: Optional[str] = None
+    dense: Optional[bool] = None
+    dense_error: Optional[str] = None
+    error_code: Optional[str] = None
+    message: Optional[str] = None
+
+
+class UploadOut(BaseModel):
+    outcome: Literal["created", "new_version", "unchanged", "skipped"]
+    document: DocumentOut
+    version: Optional[VersionOut] = None
+    index: IndexInfo
+
+
+class BatchItem(BaseModel):
+    filename: str
+    ok: bool
+    outcome: Optional[str] = None
+    document_id: Optional[str] = None
+    version_id: Optional[str] = None
+    status: Optional[str] = None
+    error_code: Optional[str] = None
+    message: Optional[str] = None
+
+
+class BatchOut(BaseModel):
+    results: List[BatchItem]
+    succeeded: int
+    failed: int
+    index: IndexInfo
+
+
+class DocumentStatusOut(BaseModel):
+    document_id: str
+    status: str
+    source: str
+    current_version: Optional[VersionOut] = None
+    latest_version: Optional[VersionOut] = None
+    retrievable: bool
+    active_generation_id: Optional[str] = None
+    dense: Optional[bool] = None
+
+
+class ChunkOut(BaseModel):
+    chunk_id: str
+    ordinal: int
+    is_parent: bool
+    parent_id: Optional[str] = None
+    section_heading: Optional[str] = None
+    page: Optional[int] = None
+    paragraph: Optional[int] = None
+    char_count: int
+    text: Optional[str] = None   # only for users with READ access; managers without a grant see metadata only
+
+
+class ChunkListOut(BaseModel):
+    document_id: str
+    version_id: str
+    version_no: int
+    total: int
+    text_visible: bool
+    chunks: List[ChunkOut]
+
+
+class GenerationOut(Out):
+    id: str
+    status: str
+    created_at: datetime
+    activated_at: Optional[datetime] = None
+    chunk_count: int
+    document_count: int
+    dense: bool
+    dense_model: Optional[str] = None
+    dense_error: Optional[str] = None
+    error_code: Optional[str] = None
+    built_by: str
+
+
+class IndexStatusOut(BaseModel):
+    retrieval_mode: str
+    dense_mode: str
+    embedder: dict
+    active: Optional[GenerationOut] = None
+    recent: List[GenerationOut]
+    pending_versions: int
+    failed_versions: int
 
 
 # --- chat ---------------------------------------------------------------------------------------------------------

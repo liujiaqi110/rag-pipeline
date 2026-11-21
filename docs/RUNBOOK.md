@@ -68,8 +68,27 @@ $env:KB_DATABASE_URL="sqlite:///./build/kb_platform.db"
 | 503 `index_unavailable` | `RAG_DATA_DIR` 下没有 Dense 和 BM25 索引 |
 | 历史回答显示“内容已隐藏” | 该回答生成后用户的权限或文档 ACL 已变更 |
 
+### 文档上传与索引（第三阶段）
+
+```powershell
+$env:KB_STORAGE_DIR="build/kb_storage"            # 必须在 build/ 下或仓库之外
+$env:HF_HOME="<本机 HuggingFace 缓存目录>"; $env:HF_HUB_OFFLINE="1"; $env:TRANSFORMERS_OFFLINE="1"
+.venv\Scripts\python -m uvicorn kb_platform.app:create_app --factory --port 8000
+```
+
+| 现象 | 处理 |
+|---|---|
+| 上传返回 415 `format_mismatch` / `unsupported_format` | 只支持 .md/.txt/.pdf/.docx，且内容必须与扩展名一致 |
+| 上传返回 413 | 超过 `KB_MAX_UPLOAD_BYTES`（默认 20 MB）或批量超过 `KB_MAX_BATCH_FILES` |
+| 409 `duplicate_name` | 同名文档已存在；用 `on_duplicate=new_version` 或 `POST /documents/{id}/versions` 更新 |
+| 版本状态 `failed` + `no_text` | 扫描件 PDF 没有文字层（不支持 OCR） |
+| 版本状态 `index_failed` | 索引构建失败，旧版本仍在服务；`POST /api/v1/index/rebuild` 重试 |
+| 问答 503 `dense_unavailable` | 当前索引没有 Dense（本机缺少 bge-m3 或 sentence-transformers）；安装后重建，或显式设置 `KB_RETRIEVAL_MODE=bm25` |
+| 上传后用户仍检索不到 | 新文档默认没有读取授权，需要 `PUT /api/v1/documents/{id}/acl` |
+
 ## 测试
 
 - `python -m unittest discover -s ragas_eval/tests -t .`：软件测试，与 CI 相同。
 - `.venv\Scripts\python -m unittest discover -s kb_platform/tests -t .`：知识库后端 API 测试（CI 中同样运行）。
+- `.venv\Scripts\python -m unittest tests_local.test_kb_platform_real -v`：第三阶段真实集成（bge-m3 + Ollama，需要设置 HF_HOME）。
 - `python -m unittest discover -s tests_local -t .`：本地重型集成测试，需要 bge-m3 和 Ollama，不在 CI 中运行。

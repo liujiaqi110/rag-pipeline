@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ragas_eval.acl import AclPolicy, PolicyError
 
-from .models import AclState, Document, KnowledgeBase, User
+from .models import AclState, Document, KbManager, KnowledgeBase, User
 
 SUBJECT_TYPES = ("user", "role", "department", "all_authenticated")
 EFFECTS = ("allow", "deny")
@@ -106,3 +106,14 @@ def kb_by_id(db: Session, kb_id: str) -> Optional[KnowledgeBase]:
 
 def all_kbs(db: Session) -> List[KnowledgeBase]:
     return list(db.scalars(select(KnowledgeBase).order_by(KnowledgeBase.name)))
+
+
+def can_manage(db: Session, user: User, kb: KnowledgeBase) -> bool:
+    """Operation permission (upload / edit / delete / ACL) — NOT read permission."""
+    if user.is_admin:
+        return True
+    return db.get(KbManager, (kb.id, user.id)) is not None
+
+
+def manages_any(db: Session, user: User) -> bool:
+    return user.is_admin or db.scalar(select(KbManager.kb_id).where(KbManager.user_id == user.id).limit(1)) is not None

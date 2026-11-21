@@ -57,3 +57,11 @@ def admin_user(user: User = Depends(current_user)) -> User:
     if not user.is_admin:
         raise ApiError(403, "forbidden", "需要平台管理员权限")
     return user
+
+
+def manager_user(user: User = Depends(current_user), db: Session = Depends(get_db)) -> User:
+    """Platform admin or manager of at least one knowledge base (per-KB checks follow in the endpoint)."""
+    from .acl_store import manages_any
+    if not manages_any(db, user):
+        raise ApiError(403, "forbidden", "需要知识库管理权限")
+    return user

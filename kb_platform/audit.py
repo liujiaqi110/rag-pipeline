@@ -22,7 +22,8 @@ log = logging.getLogger("kb_platform")
 
 SAFE_KEYS = {"status", "llm_calls", "authorized_documents", "authorized_chunks", "policy_version", "question_sha256",
              "question_chars", "citations", "kb_id", "session_id", "document_id", "target_user", "reason", "cached",
-             "http_status", "path", "method", "count", "fields", "error"}
+             "http_status", "path", "method", "count", "fields", "error", "generation", "mode", "version_id",
+             "version_no", "outcome", "error_code", "chunks", "dense", "files", "ok", "failed"}
 
 
 def question_fingerprint(q: str) -> Dict[str, Any]:

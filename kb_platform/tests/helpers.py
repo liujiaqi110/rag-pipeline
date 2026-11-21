@@ -51,7 +51,7 @@ class ApiCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = Path(tempfile.mkdtemp(prefix="kbapi_"))
+        """P2 harness: external (offline-built) index = the synthetic ACL corpus through a fake base retriever."""
         cls.llm = RecordingLLM()
         cls.base = None
 
@@ -59,8 +59,13 @@ class ApiCase(unittest.TestCase):
             cls.base = corpus().retriever()
             return cls.base
         st = Settings(database_url="sqlite://", **cls.settings_overrides)
-        cls.backend = RagBackend(retriever_factory=rf, llm_factory=lambda: cls.llm,
-                                 cache=AnswerCache(st.answer_cache_size, st.answer_cache_ttl_s))
+        cls.setUpClass_with(st, RagBackend(retriever_factory=rf, llm_factory=lambda: cls.llm,
+                                           cache=AnswerCache(st.answer_cache_size, st.answer_cache_ttl_s)))
+
+    @classmethod
+    def setUpClass_with(cls, st, backend):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="kbapi_"))
+        cls.backend = backend
         cls.app = create_app(st, cls.backend)
         cls.client = TestClient(cls.app)
         cls.factory = cls.app.state.sessionmaker

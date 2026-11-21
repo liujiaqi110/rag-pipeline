@@ -127,6 +127,8 @@ $env:RAG_DATA_DIR="D:\my_rag_data"
 
 第二阶段新增企业知识库后端 `kb_platform/`（FastAPI + SQLAlchemy + SQLite）：认证、用户/角色/部门/文档 ACL 持久化、知识库与文档 API、带 ACL 的会话问答、审计日志。依赖见 `requirements-api.txt`，接口文档见 `/docs` 和 [docs/openapi.json](docs/openapi.json)。
 
+第三阶段增加文档上传与自动索引：支持 Markdown / TXT / PDF / DOCX 单文件与批量上传，复用原有切片脚本（03/04/05）和 BM25 / bge-m3 Dense 索引，支持版本更新、停用、删除和索引故障恢复；新文档默认无人可读。
+
 ## 8. 测试与 CI
 
 ```powershell
